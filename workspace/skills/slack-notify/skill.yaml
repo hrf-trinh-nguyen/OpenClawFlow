@@ -1,0 +1,13 @@
+name: slack-notify
+version: 1.0.0
+author: openclaw-mvp
+description: Slack – Send daily report text to a Slack channel. Reads daily_report_text from state.
+permissions:
+  - channels
+config:
+  SLACK_CHANNEL:
+    type: string
+    required: true
+entryPoint:
+  type: typescript
+  path: index.ts

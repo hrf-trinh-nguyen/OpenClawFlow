@@ -1,0 +1,63 @@
+{
+  "agents": {
+    "defaults": {
+      "workspace": "/home/os/.openclaw/workspace"
+    }
+  },
+  "gateway": {
+    "port": 18789,
+    "mode": "local"
+  },
+  "channels": {
+    "slack": {
+      "enabled": true,
+      "mode": "socket",
+      "appToken": "${SLACK_APP_TOKEN}",
+      "botToken": "${SLACK_BOT_TOKEN}",
+      "dmPolicy": "allowlist",
+      "groupPolicy": "allowlist",
+      "allowFrom": ["U091B2492SX"]
+    }
+  },
+  "skills": {
+    "entries": {
+      "build-list": {
+        "enabled": true,
+        "env": {
+          "APOLLO_API_KEY": "${APOLLO_API_KEY}",
+          "BOUNCER_API_KEY": "${BOUNCER_API_KEY}"
+        }
+      },
+      "load-campaign": {
+        "enabled": true,
+        "env": {
+          "INSTANTLY_API_KEY": "${INSTANTLY_API_KEY}",
+          "INSTANTLY_CAMPAIGN_ID": "${INSTANTLY_CAMPAIGN_ID}"
+        }
+      },
+      "process-replies": {
+        "enabled": true,
+        "env": {
+          "INSTANTLY_API_KEY": "${INSTANTLY_API_KEY}",
+          "INSTANTLY_CAMPAIGN_ID": "${INSTANTLY_CAMPAIGN_ID}"
+        }
+      },
+      "daily-report": {
+        "enabled": true,
+        "env": {
+          "SLACK_CHANNEL": "${SLACK_REPORT_CHANNEL}"
+        }
+      }
+    }
+  },
+  "cron": {
+    "enabled": true,
+    "store": "~/.openclaw/cron/jobs.json",
+    "maxConcurrentRuns": 1,
+    "sessionRetention": "24h",
+    "runLog": {
+      "maxBytes": "2mb",
+      "keepLines": 2000
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "openclaw-outbound-automation",
+  "version": "1.0.0",
+  "description": "OpenClaw outbound automation with Supabase persistence",
+  "type": "module",
+  "dependencies": {
+    "pg": "^8.11.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/pg": "^8.10.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.3.0"
+  },
+  "scripts": {
+    "build": "tsup",
+    "db:migrate": "node scripts/run-supabase-migration.mjs",
+    "monthly-report": "node scripts/monthly-report.mjs",
+    "postinstall": "node scripts/ensure-openclaw-sdk-shim.mjs"
+  }
+}

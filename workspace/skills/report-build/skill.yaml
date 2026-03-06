@@ -1,0 +1,9 @@
+name: report-build
+version: 1.0.0
+author: openclaw-mvp
+description: Build daily pipeline report – aggregate metrics from state into a structured report object. No external service calls.
+permissions: []
+config: {}
+entryPoint:
+  type: typescript
+  path: index.ts

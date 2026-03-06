@@ -1,0 +1,25 @@
+# Secrets - never commit
+.env
+workspace/.env
+*.env.local
+
+# Backup (if ever copied in)
+.openclaw.bak
+
+# Runtime / state (OpenClaw sessions, cron runs, delivery queue)
+agents/
+state/
+cron/runs/
+delivery-queue/
+logs/
+devices/
+subagents/
+identity/
+memory/
+update-check.json
+
+# Workspace runtime
+workspace/.openclaw/
+workspace/memory/
+workspace/state/
+workspace/node_modules/

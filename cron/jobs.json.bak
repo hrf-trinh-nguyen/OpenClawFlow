@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "jobs": [
+    {
+      "id": "d66c8bed-6c9c-4100-93d6-590409600cea",
+      "name": "6AM - Build List",
+      "enabled": true,
+      "createdAtMs": 1772788600592,
+      "updatedAtMs": 1772788600592,
+      "schedule": {
+        "kind": "cron",
+        "expr": "0 6 * * *",
+        "tz": "Asia/Ho_Chi_Minh"
+      },
+      "sessionTarget": "isolated",
+      "wakeMode": "now",
+      "payload": {
+        "kind": "agentTurn",
+        "message": "Run workflow: build-list"
+      },
+      "delivery": {
+        "mode": "none",
+        "channel": "last"
+      },
+      "state": {
+        "nextRunAtMs": 1772838000000
+      }
+    },
+    {
+      "id": "0d6eb890-7f8e-47a2-95d7-b50d268ff950",
+      "name": "6:30AM - Load Campaign",
+      "enabled": true,
+      "createdAtMs": 1772788601690,
+      "updatedAtMs": 1772788601690,
+      "schedule": {
+        "kind": "cron",
+        "expr": "30 6 * * *",
+        "tz": "Asia/Ho_Chi_Minh"
+      },
+      "sessionTarget": "isolated",
+      "wakeMode": "now",
+      "payload": {
+        "kind": "agentTurn",
+        "message": "Run workflow: load-campaign"
+      },
+      "delivery": {
+        "mode": "none",
+        "channel": "last"
+      },
+      "state": {
+        "nextRunAtMs": 1772839800000
+      }
+    },
+    {
+      "id": "732a5f1a-9a0d-49ee-8609-bcd02de3e73a",
+      "name": "6PM - Process Replies",
+      "enabled": true,
+      "createdAtMs": 1772788602788,
+      "updatedAtMs": 1772788602788,
+      "schedule": {
+        "kind": "cron",
+        "expr": "0 18 * * *",
+        "tz": "Asia/Ho_Chi_Minh"
+      },
+      "sessionTarget": "isolated",
+      "wakeMode": "now",
+      "payload": {
+        "kind": "agentTurn",
+        "message": "Run workflow: process-replies"
+      },
+      "delivery": {
+        "mode": "none",
+        "channel": "last"
+      },
+      "state": {
+        "nextRunAtMs": 1772794800000
+      }
+    }
+  ]
+}

@@ -1,0 +1,100 @@
+{
+  "agents": {
+    "defaults": {
+      "workspace": "/home/os/.openclaw/workspace",
+      "model": "openai/gpt-5.1",
+      "compaction": {
+        "mode": "safeguard"
+      }
+    }
+  },
+  "commands": {
+    "native": "auto",
+    "nativeSkills": "auto",
+    "restart": true,
+    "ownerDisplay": "raw"
+  },
+  "cron": {
+    "enabled": true,
+    "store": "~/.openclaw/cron/jobs.json",
+    "maxConcurrentRuns": 1,
+    "sessionRetention": "24h",
+    "runLog": {
+      "maxBytes": "2mb",
+      "keepLines": 2000
+    }
+  },
+  "channels": {
+    "slack": {
+      "mode": "socket",
+      "webhookPath": "/slack/events",
+      "enabled": true,
+      "botToken": "${SLACK_BOT_TOKEN}",
+      "appToken": "${SLACK_APP_TOKEN}",
+      "userTokenReadOnly": true,
+      "groupPolicy": "allowlist",
+      "dmPolicy": "allowlist",
+      "allowFrom": [
+        "U091B2492SX"
+      ],
+      "nativeStreaming": true,
+      "streaming": "partial",
+      "commands": {
+        "native": true,
+        "nativeSkills": true
+      }
+    }
+  },
+  "gateway": {
+    "port": 18789,
+    "mode": "local",
+    "auth": {
+      "mode": "token",
+      "token": "3d4df0754b159f68a9be12edce993725e918b39d492df257"
+    }
+  },
+  "skills": {
+    "entries": {
+      "apollo": {
+        "enabled": true,
+        "env": {
+          "APOLLO_API_KEY": "${APOLLO_API_KEY}",
+          "OPENCLAW_STATE_DIR": "${OPENCLAW_STATE_DIR}"
+        }
+      },
+      "bouncer": {
+        "enabled": true,
+        "env": {
+          "BOUNCER_API_KEY": "${BOUNCER_API_KEY}",
+          "OPENCLAW_STATE_DIR": "${OPENCLAW_STATE_DIR}"
+        }
+      },
+      "instantly": {
+        "enabled": true,
+        "env": {
+          "INSTANTLY_API_KEY": "${INSTANTLY_API_KEY}",
+          "INSTANTLY_CAMPAIGN_ID": "${INSTANTLY_CAMPAIGN_ID}",
+          "OPENCLAW_STATE_DIR": "${OPENCLAW_STATE_DIR}"
+        }
+      },
+      "report-build": {
+        "enabled": true,
+        "env": {
+          "SUPABASE_DB_URL": "${SUPABASE_DB_URL}",
+          "OPENCLAW_STATE_DIR": "${OPENCLAW_STATE_DIR}"
+        }
+      },
+      "slack-notify": {
+        "enabled": true,
+        "env": {
+          "SLACK_CHANNEL": "${SLACK_REPORT_CHANNEL}",
+          "OPENCLAW_STATE_DIR": "${OPENCLAW_STATE_DIR}"
+        }
+      }
+    }
+  },
+  "meta": {
+    "lastTouchedVersion": "2026.3.2",
+    "lastTouchedAt": "2026-03-03T09:08:43.014Z"
+  }
+}
