@@ -10,7 +10,7 @@
 
 **Run in sequence:**
 
-1. **Apollo service** — collect N leads (default 100; set `TARGET_COUNT`), write to DB with `processing_status='apollo_matched'`
+1. **Apollo service** — collect N leads (default 100; set `TARGET_COUNT` from user message), write to DB with `processing_status='apollo_matched'`
    ```bash
    cd ~/.openclaw && source .env && TARGET_COUNT=100 node workspace/skills/apollo/index.mjs
    ```
@@ -40,16 +40,33 @@
 
 ## process-replies
 
-**Purpose:** Fetch replies from Instantly and classify them with the LLM.
+**Purpose:** Fetch replies from Instantly and classify them with the LLM. **Default: today only** (0h-24h); never pulls all replies.
 
 **Run:**
 
-1. **Instantly service (fetch + classify)** — fetch received emails, classify hot/soft/objection/negative, save to DB
+1. **Instantly service (fetch + classify)** — fetch today's replies, classify hot/soft/objection/negative, save to DB
    ```bash
    cd ~/.openclaw && source .env && MODE=fetch node workspace/skills/instantly/index.mjs
    ```
 
-**Command:** `Run workflow: process-replies`
+**Fetch replies for a specific date:**
+   ```bash
+   cd ~/.openclaw && source .env && FETCH_DATE=2026-03-06 MODE=fetch node workspace/skills/instantly/index.mjs
+   ```
+
+**Fetch replies for a date range** (user provides start + end):
+   ```bash
+   cd ~/.openclaw && source .env && FETCH_DATE_FROM=2026-03-01 FETCH_DATE_TO=2026-03-05 MODE=fetch node workspace/skills/instantly/index.mjs
+   ```
+
+**Fetch + tổng hợp (report):**
+   ```bash
+   cd ~/.openclaw && source .env && \
+   FETCH_DATE=$(date +%Y-%m-%d) MODE=fetch node workspace/skills/instantly/index.mjs && \
+   REPORT_DATE=$(date +%Y-%m-%d) OPENCLAW_STATE_DIR="$HOME/.openclaw/state" node workspace/skills/report-build/index.mjs
+   ```
+
+**Command:** `Run workflow: process-replies` / `fetch reply hôm nay và tổng hợp`
 
 ---
 

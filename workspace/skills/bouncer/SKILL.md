@@ -21,7 +21,7 @@ Autonomous email verification service using Bouncer batch API.
 ## Parameters (ENV variables)
 
 - `BOUNCER_API_KEY`: Bouncer API key (required)
-- `BOUNCER_BATCH_SIZE`: batch size (default: 100, max: 100)
+- `BOUNCER_BATCH_SIZE`: batch size (default: 1000, max: 1000 per Bouncer rate limit)
 
 ## Execute
 

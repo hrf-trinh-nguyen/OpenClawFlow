@@ -11,7 +11,8 @@ OpenClaw runs the full pipeline while Instantly handles actual email sending:
 | **6:00 AM** | `build-list` | apollo → bouncer |
 | **6:30 AM** | `load-campaign` | instantly (MODE=load) |
 | **9:00 AM – 5:00 PM** | *(Instantly UI)* | Sending window (autopilot) |
-| **6:00 PM** | `process-replies` | instantly (MODE=fetch) |
+| **6:00 PM** | `process-replies` | instantly (MODE=fetch): classify + reply hot |
+| **8:00 PM** | `process-replies` | same (6–9:30 window) |
 | **10:00 PM** | `daily-report` | report-build → slack-notify |
 
 **Philosophy:** 2 emails per prospect, 45-day coverage cycle. Full TAM coverage every 45 days.
@@ -105,7 +106,7 @@ Slack uses **Socket Mode** by default. See [OpenClaw Slack docs](https://docs.op
 - **Option A – one command:** Create a slash command named **`skill`**. Users run e.g. `/skill apollo` or `/skill build-list` (workflow = run skills in order per `rules/workflows.md`).
 - **Option B – one per skill:** Create slash commands for each skill: `/apollo`, `/bouncer`, `/instantly`, `/report-build`, `/slack-notify`. Use the same Request URL as for other slash commands (your gateway’s Slack events URL).
 
-Slack reserves `/status`; register **`/agentstatus`** for the status command. **Cách tạo từng command trong Slack:** xem [docs/slack-slash-commands.md](docs/slack-slash-commands.md). See also [Slash commands](https://docs.openclaw.ai/tools/slash-commands).
+Slack reserves `/status`; register **`/agentstatus`** for the status command. **How to create each command in Slack:** see [docs/slack-slash-commands.md](docs/slack-slash-commands.md). See also [Slash commands](https://docs.openclaw.ai/tools/slash-commands).
 
 **2. Chat (workflow / “what skills”)**  
 In DM or channel, the agent is instructed to treat these as workflow commands and to read `TOOLS.md` for the skill list:

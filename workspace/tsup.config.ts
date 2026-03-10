@@ -9,6 +9,10 @@ export default defineConfig({
     // Reporting
     'skills/report-build/index':   'skills/report-build/index.ts',
     'skills/slack-notify/index':   'skills/slack-notify/index.ts',
+    // Lead management
+    'skills/lead-stats/index':     'skills/lead-stats/index.ts',
+    'skills/lead-move/index':      'skills/lead-move/index.ts',
+    'skills/lead-delete/index':    'skills/lead-delete/index.ts',
     // Shared libraries
     'lib/supabase-pipeline': 'lib/supabase-pipeline.ts',
     'lib/supabase-legacy':   'lib/supabase-legacy.ts',

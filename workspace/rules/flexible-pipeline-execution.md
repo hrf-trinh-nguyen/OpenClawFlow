@@ -6,7 +6,7 @@
 
 ## Core Concept
 
-Users can describe their intent in **natural language** (Vietnamese, English, or any language). You parse the intent and execute the appropriate service with extracted parameters.
+Users can describe their intent in **natural language** (English or any language). You parse the intent and execute the appropriate service with extracted parameters.
 
 **Key principle:** Services are **database-driven** and **autonomous**. They pull data from the `leads` table based on `processing_status`, so they don't depend on previous steps completing first.
 
@@ -28,9 +28,9 @@ Users can describe their intent in **natural language** (Vietnamese, English, or
 ### Pattern 1: Collect leads from Apollo
 
 **User prompts (examples):**
-- "lấy 500 leads từ Apollo"
+- "get 500 leads from Apollo"
 - "get 500 new contacts from Apollo"
-- "tôi muốn 1000 người liên lạc mới hôm nay"
+- "I want 1000 new contacts today"
 - "pull 200 founders from Apollo in Vietnam"
 - "collect 50 B2B SaaS CEOs"
 
@@ -70,9 +70,9 @@ Users can describe their intent in **natural language** (Vietnamese, English, or
 ### Pattern 2: Verify emails (Bouncer)
 
 **User prompts:**
-- "verify tất cả emails đang chờ"
+- "verify all pending emails"
 - "verify all pending leads"
-- "chạy Bouncer cho leads mới"
+- "run Bouncer for new leads"
 - "check email deliverability"
 
 **What you do:**
@@ -88,7 +88,7 @@ Users can describe their intent in **natural language** (Vietnamese, English, or
    ```
 
 3. **Service behavior:**
-   - Bouncer pulls 100 leads at a time (Bouncer API batch limit)
+   - Bouncer pulls all qualified leads in batches (default 1000, max 1000 per Bouncer rate limit)
    - Submits to Bouncer batch verify API
    - Polls until batch completes (~1-2 min)
    - Updates DB: deliverable → `bouncer_verified`, others → `failed`
@@ -110,7 +110,7 @@ Users can describe their intent in **natural language** (Vietnamese, English, or
 ### Pattern 3: Load campaign (Instantly)
 
 **User prompts:**
-- "load tất cả leads đã verify vào Instantly"
+- "load all verified leads into Instantly"
 - "push verified leads to campaign"
 - "add leads to Instantly"
 
@@ -139,7 +139,7 @@ Users can describe their intent in **natural language** (Vietnamese, English, or
 ### Pattern 4: Run full pipeline
 
 **User prompts:**
-- "chạy full workflow: 500 leads"
+- "run full workflow: 500 leads"
 - "run complete pipeline with 300 new contacts"
 - "execute end-to-end from Apollo to Instantly"
 
@@ -172,17 +172,16 @@ Users can describe their intent in **natural language** (Vietnamese, English, or
 ### Pattern 5: View report by date
 
 **User prompts:**
-- "xem report ngày 06/03/2026"
-- "report ngày 6 tháng 3"
-- "báo cáo 6/3/2026"
+- "show report for March 6, 2026"
+- "report for 6 March"
+- "report 2026-03-06"
 - "show report for March 6, 2026"
 
 **What you do:**
 1. **Parse date** → convert to `YYYY-MM-DD`:
    - `06/03/2026` (DD/MM/YYYY) → `2026-03-06`
-   - "ngày 6 tháng 3 năm 2026" → `2026-03-06`
    - "March 6, 2026" → `2026-03-06`
-   - When ambiguous (e.g. 06/03), assume **DD/MM/YYYY** for Vietnamese context.
+   - When ambiguous (e.g. 06/03), assume **DD/MM/YYYY**.
 
 2. **Run report-build:**
    ```bash
@@ -211,7 +210,7 @@ Users can describe their intent in **natural language** (Vietnamese, English, or
 | Variable | Type | Example | Description |
 |----------|------|---------|-------------|
 | `BOUNCER_API_KEY` | string | (from .env) | Bouncer API key |
-| `BOUNCER_BATCH_SIZE` | number | `100` | Max 100 per batch (API limit) |
+| `BOUNCER_BATCH_SIZE` | number | `1000` | Batch size (default 1000, max 1000 per Bouncer rate limit) |
 
 ### Instantly Service ENV vars
 
@@ -219,12 +218,15 @@ Users can describe their intent in **natural language** (Vietnamese, English, or
 |----------|------|---------|-------------|
 | `INSTANTLY_API_KEY` | string | (from .env) | Instantly API key |
 | `INSTANTLY_CAMPAIGN_ID` | string | (from .env) | Campaign ID |
+| `MODE` | string | `load`, `fetch`, `all` | `load` = push leads; `fetch` = get replies + classify |
+| `FETCH_DATE` | string | `2026-03-06` | Single day (YYYY-MM-DD). Default: today. |
+| `FETCH_DATE_FROM` + `FETCH_DATE_TO` | string | `2026-03-01`, `2026-03-05` | Date range when user provides start + end. |
 
 ### Report-build ENV vars
 
 | Variable | Type | Example | Description |
 |----------|------|---------|-------------|
-| `REPORT_DATE` | string | `2026-03-06` | Date in YYYY-MM-DD. Default: today. Use for "xem report ngày X" requests. |
+| `REPORT_DATE` | string | `2026-03-06` | Date in YYYY-MM-DD. Default: today. Use for "show report for date X" requests. |
 
 ---
 
@@ -232,7 +234,7 @@ Users can describe their intent in **natural language** (Vietnamese, English, or
 
 ### Scenario A: Incremental collection
 ```
-User: "lấy thêm 100 leads nữa"
+User: "get 100 more leads"
 
 Agent:
 → Check DB: currently have 472 leads with status='instantly_loaded'
@@ -242,7 +244,7 @@ Agent:
 
 ### Scenario B: Re-verify old leads
 ```
-User: "verify lại những leads có email_status=unknown"
+User: "re-verify leads with email_status=unknown"
 
 Agent:
 → Update DB: UPDATE leads SET processing_status='apollo_matched' WHERE email_status='unknown'
@@ -252,7 +254,7 @@ Agent:
 
 ### Scenario C: Status check
 ```
-User: "có bao nhiêu leads đang chờ xử lý?"
+User: "how many leads are pending?"
 
 Agent:
 → Query DB:
@@ -339,12 +341,12 @@ Your 500 leads will go through these stages:
 
 ### 4. Handle flexible wording
 Recognize variations:
-- "lấy leads" = "get leads" = "collect contacts" = "pull prospects"
+- "get leads" = "collect contacts" = "pull prospects"
 - "verify" = "validate" = "check emails" = "bouncer"
 - "load" = "push" = "add to campaign" = "upload to Instantly"
 
 ### 5. Infer missing parameters
-If user says "lấy 500 leads" without specifying ICP:
+If user says "get 500 leads" without specifying ICP:
 ```
 ✅ Collecting 500 leads with default ICP:
 • Titles: vp marketing, head of marketing, vp sales, director of marketing/sales

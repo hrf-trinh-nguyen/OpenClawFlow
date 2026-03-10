@@ -6,7 +6,7 @@
       "name": "6AM - Build List",
       "enabled": true,
       "createdAtMs": 1772788600592,
-      "updatedAtMs": 1772788600592,
+      "updatedAtMs": 1773112025352,
       "schedule": {
         "kind": "cron",
         "expr": "0 6 * * *",
@@ -23,7 +23,14 @@
         "channel": "last"
       },
       "state": {
-        "nextRunAtMs": 1772838000000
+        "nextRunAtMs": 1773183600000,
+        "lastRunAtMs": 1773111651304,
+        "lastRunStatus": "ok",
+        "lastStatus": "ok",
+        "lastDurationMs": 374048,
+        "lastDelivered": false,
+        "lastDeliveryStatus": "not-delivered",
+        "consecutiveErrors": 0
       }
     },
     {
@@ -31,7 +38,7 @@
       "name": "6:30AM - Load Campaign",
       "enabled": true,
       "createdAtMs": 1772788601690,
-      "updatedAtMs": 1772788601690,
+      "updatedAtMs": 1773112063854,
       "schedule": {
         "kind": "cron",
         "expr": "30 6 * * *",
@@ -48,7 +55,14 @@
         "channel": "last"
       },
       "state": {
-        "nextRunAtMs": 1772839800000
+        "nextRunAtMs": 1773185400000,
+        "lastRunAtMs": 1773112025352,
+        "lastRunStatus": "ok",
+        "lastStatus": "ok",
+        "lastDurationMs": 38502,
+        "lastDelivered": false,
+        "lastDeliveryStatus": "not-delivered",
+        "consecutiveErrors": 0
       }
     },
     {
@@ -56,7 +70,7 @@
       "name": "6PM - Process Replies",
       "enabled": true,
       "createdAtMs": 1772788602788,
-      "updatedAtMs": 1772788602788,
+      "updatedAtMs": 1773112089669,
       "schedule": {
         "kind": "cron",
         "expr": "0 18 * * *",
@@ -73,7 +87,14 @@
         "channel": "last"
       },
       "state": {
-        "nextRunAtMs": 1772794800000
+        "nextRunAtMs": 1773140400000,
+        "lastRunAtMs": 1773112063854,
+        "lastRunStatus": "ok",
+        "lastStatus": "ok",
+        "lastDurationMs": 25815,
+        "lastDelivered": false,
+        "lastDeliveryStatus": "not-delivered",
+        "consecutiveErrors": 0
       }
     },
     {
@@ -81,7 +102,7 @@
       "name": "10PM - Daily Report",
       "enabled": true,
       "createdAtMs": 1772788603877,
-      "updatedAtMs": 1772788603877,
+      "updatedAtMs": 1773112122258,
       "schedule": {
         "kind": "cron",
         "expr": "0 22 * * *",
@@ -99,7 +120,14 @@
         "to": "channel:C0A720WG11N"
       },
       "state": {
-        "nextRunAtMs": 1772809200000
+        "nextRunAtMs": 1773154800000,
+        "lastRunAtMs": 1773112089669,
+        "lastRunStatus": "ok",
+        "lastStatus": "ok",
+        "lastDurationMs": 32589,
+        "lastDelivered": true,
+        "lastDeliveryStatus": "delivered",
+        "consecutiveErrors": 0
       }
     }
   ]

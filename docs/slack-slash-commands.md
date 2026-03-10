@@ -1,61 +1,61 @@
-# Tạo Slash Commands trên Slack (cho OpenClaw)
+# Creating Slash Commands in Slack (for OpenClaw)
 
-Để dùng `/skill`, `/subagents`, `/agentstatus`… trong Slack, bạn cần **tạo từng slash command** trong Slack App. Slack không tự sinh lệnh từ OpenClaw.
+To use `/skill`, `/subagents`, `/agentstatus`, etc. in Slack, you must **create each slash command** in your Slack app. Slack does not auto-generate commands from OpenClaw.
 
-## Bước 1: Mở Slack App
+## Step 1: Open Slack App
 
-1. Vào **[api.slack.com/apps](https://api.slack.com/apps)** và đăng nhập.
-2. Chọn **app** của bạn (app đang dùng với OpenClaw, có Bot Token `xoxb-...`).
+1. Go to **[api.slack.com/apps](https://api.slack.com/apps)** and sign in.
+2. Select **your app** (the app used with OpenClaw, with Bot Token `xoxb-...`).
 
-## Bước 2: Vào Slash Commands
+## Step 2: Go to Slash Commands
 
-1. Trong menu bên trái, chọn **Slash Commands** (trong mục **Features**).
-2. Bấm **Create New Command**.
+1. In the left menu, select **Slash Commands** (under **Features**).
+2. Click **Create New Command**.
 
-## Bước 3: Điền thông tin cho từng command
+## Step 3: Fill in details for each command
 
-Với **mỗi** lệnh bạn muốn dùng, tạo một command. Điền:
+For **each** command you want to use, create one. Fill in:
 
-| Ô | Giá trị |
-|---|--------|
-| **Command** | Tên lệnh (không gõ dấu `/`). Ví dụ: `skill`, `subagents`, `agentstatus`. |
-| **Request URL** | Với **Socket Mode** (bạn đang dùng), Slack gửi payload qua WebSocket nên URL này thường không được gọi. Điền **placeholder**: `https://socket-mode.slack.com` (hoặc bất kỳ URL HTTPS hợp lệ). Nếu sau này chuyển sang HTTP mode, đổi thành URL gateway thật (vd: `https://your-domain.com/slack/events`). |
-| **Short Description** | Mô tả ngắn cho user. VD: "Run a workspace skill (e.g. apollo, build-list)". |
-| **Usage Hint** | (Tùy chọn) Gợi ý tham số. VD: "apollo" hoặc "list" cho subagents. |
+| Field | Value |
+|-------|-------|
+| **Command** | Command name (do not type `/`). E.g.: `skill`, `subagents`, `agentstatus`. |
+| **Request URL** | With **Socket Mode** (what you're using), Slack sends payload via WebSocket so this URL is typically not called. Use a **placeholder**: `https://socket-mode.slack.com` (or any valid HTTPS URL). If you later switch to HTTP mode, change this to your real gateway URL (e.g. `https://your-domain.com/slack/events`). |
+| **Short Description** | Brief description for users. E.g.: "Run a workspace skill (e.g. apollo, build-list)". |
+| **Usage Hint** | (Optional) Parameter hint. E.g.: "apollo" or "list" for subagents. |
 
-Sau đó bấm **Save**.
+Then click **Save**.
 
-## Các command nên tạo
+## Commands to create
 
-Tạo **ít nhất** các command sau:
+Create **at least** these commands:
 
-| Command (trong Slack gõ) | Trong form "Command" | Short Description |
-|---------------------------|----------------------|-------------------|
+| Command (in Slack) | Form "Command" field | Short Description |
+|--------------------|----------------------|--------------------|
 | `/skill` | `skill` | Run a workspace skill (e.g. apollo, build-list) |
 | `/subagents` | `subagents` | List or inspect sub-agent runs (list, info, log, kill) |
-| `/agentstatus` | `agentstatus` | Show bot status (Slack giữ `/status` nên dùng tên này) |
-| `/help` | `help` | Show help (nếu muốn dùng native) |
-| `/commands` | `commands` | List commands (nếu muốn dùng native) |
+| `/agentstatus` | `agentstatus` | Show bot status (Slack reserves `/status`, so use this name) |
+| `/help` | `help` | Show help (if using native) |
+| `/commands` | `commands` | List commands (if using native) |
 
-**Lưu ý:** Slack **reserve** `/status` nên không đăng ký được; OpenClaw dùng **`/agentstatus`** cho chức năng status.
+**Note:** Slack **reserves** `/status`, so it cannot be registered; OpenClaw uses **`/agentstatus`** for status functionality.
 
-## Bước 4: Cài lại app vào workspace (nếu cần)
+## Step 4: Reinstall app into workspace (if needed)
 
-- Nếu app đã cài vào workspace rồi, slash command mới sẽ xuất hiện sau vài giây.
-- Nếu chưa cài: **Install to Workspace** (hoặc **Reinstall**) trong mục **Settings** → **Install App**.
+- If the app is already installed in the workspace, new slash commands appear within a few seconds.
+- If not installed: **Install to Workspace** (or **Reinstall**) under **Settings** → **Install App**.
 
-## Kiểm tra
+## Verify
 
-1. Vào Slack (DM với bot hoặc channel có bot).
-2. Gõ `/` → danh sách lệnh sẽ có các command bạn vừa tạo (vd: `/skill`, `/subagents`, `/agentstatus`).
-3. Thử: `/skill apollo` hoặc `/subagents list`.
+1. Open Slack (DM with bot or channel with bot).
+2. Type `/` → the list will show commands you created (e.g. `/skill`, `/subagents`, `/agentstatus`).
+3. Try: `/skill apollo` or `/subagents list`.
 
 ## Socket Mode vs Request URL
 
-- Bạn đang dùng **Socket Mode** (`channels.slack.mode: "socket"`). Slack **không** gửi slash command qua HTTP tới Request URL mà gửi qua kết nối WebSocket. Request URL trong form Slack chỉ để “đăng ký” command; nhiều người dùng placeholder như `https://socket-mode.slack.com`.
-- Nếu sau này chuyển sang **HTTP mode**, cần đổi Request URL thành URL gateway thật (vd: `https://your-server.com/slack/events`) và cấu hình Event Subscriptions / Interactivity trỏ cùng URL đó.
+- You are using **Socket Mode** (`channels.slack.mode: "socket"`). Slack **does not** send slash commands via HTTP to the Request URL; it sends them over the WebSocket connection. The Request URL in the Slack form is only to "register" the command; many users use a placeholder like `https://socket-mode.slack.com`.
+- If you later switch to **HTTP mode**, change the Request URL to your real gateway URL (e.g. `https://your-server.com/slack/events`) and configure Event Subscriptions / Interactivity to point to that same URL.
 
-## Tham khảo
+## References
 
 - [Slack: Slash commands](https://api.slack.com/interactivity/slash-commands)
 - [OpenClaw: Slash commands](https://docs.openclaw.ai/tools/slash-commands)

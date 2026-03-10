@@ -18,9 +18,10 @@ function getDb() {
 async function getDailyReportsByMonth(client, year, month) {
   const startDate = `${year}-${String(month).padStart(2, "0")}-01`;
   const result = await client.query(
-    `SELECT report_date::text, person_ids_count, leads_pulled, leads_validated, leads_removed,
+    `SELECT report_date::text, campaign_id, person_ids_count, leads_pulled, leads_validated, leads_removed,
             pushed_ok, pushed_failed, replies_fetched, hot_count, soft_count, objection_count, negative_count,
-            deliverable_rate, bounce_rate, spam_complaint_rate
+            deliverable_rate, bounce_rate, spam_complaint_rate,
+            COALESCE(sent, 0) as sent, COALESCE(opened, 0) as opened, COALESCE(replies, 0) as replies
      FROM daily_reports
      WHERE report_date >= $1::date AND report_date < $1::date + INTERVAL '1 month'
      ORDER BY report_date ASC`,
@@ -41,7 +42,10 @@ async function getDailyReportsByMonth(client, year, month) {
     negative_count: Number(r.negative_count) || 0,
     deliverable_rate: Number(r.deliverable_rate) || 0,
     bounce_rate: Number(r.bounce_rate) || 0,
-    spam_complaint_rate: Number(r.spam_complaint_rate) || 0
+    spam_complaint_rate: Number(r.spam_complaint_rate) || 0,
+    sent: Number(r.sent) || 0,
+    opened: Number(r.opened) || 0,
+    replies: Number(r.replies) || 0
   }));
 }
 
@@ -73,13 +77,18 @@ async function main() {
       hot_count: acc.hot_count + (r.hot_count || 0),
       soft_count: acc.soft_count + (r.soft_count || 0),
       objection_count: acc.objection_count + (r.objection_count || 0),
-      negative_count: acc.negative_count + (r.negative_count || 0)
+      negative_count: acc.negative_count + (r.negative_count || 0),
+      sent: acc.sent + (r.sent || 0),
+      opened: acc.opened + (r.opened || 0),
+      replies: acc.replies + (r.replies || 0)
     }),
-    { person_ids_count: 0, leads_pulled: 0, leads_validated: 0, leads_removed: 0, pushed_ok: 0, pushed_failed: 0, replies_fetched: 0, hot_count: 0, soft_count: 0, objection_count: 0, negative_count: 0 }
+    { person_ids_count: 0, leads_pulled: 0, leads_validated: 0, leads_removed: 0, pushed_ok: 0, pushed_failed: 0, replies_fetched: 0, hot_count: 0, soft_count: 0, objection_count: 0, negative_count: 0, sent: 0, opened: 0, replies: 0 }
   );
   const dr = totals.leads_pulled > 0 ? Math.round(totals.leads_validated / totals.leads_pulled * 1e3) / 10 : 0;
   const br = totals.leads_validated + totals.leads_removed > 0 ? Math.round(totals.leads_removed / (totals.leads_validated + totals.leads_removed) * 1e4) / 100 : 0;
   const nr = totals.replies_fetched > 0 ? Math.round(totals.negative_count / totals.replies_fetched * 1e4) / 100 : 0;
+  const openRatePct = totals.sent > 0 ? (totals.opened / totals.sent * 100).toFixed(1) : "0";
+  const replyRatePct = totals.sent > 0 ? (totals.replies / totals.sent * 100).toFixed(2) : "0";
   const text = [
     `*OpenClaw Monthly Report \u2014 ${year}-${String(month).padStart(2, "0")}*`,
     `(${reports.length} days with data)`,
@@ -91,7 +100,12 @@ async function main() {
     `\u2022 Removed: ${totals.leads_removed} (bounce \u2248 ${br.toFixed(2)}%)`,
     `\u2022 Pushed to Instantly: ${totals.pushed_ok} ok / ${totals.pushed_failed} failed`,
     "",
-    "*Reply Processing (total)*",
+    "*Campaign (Instantly API, total)*",
+    `\u2022 Emails sent: ${totals.sent}`,
+    `\u2022 Opens: ${totals.opened} (${openRatePct}%)`,
+    `\u2022 Replies: ${totals.replies} (${replyRatePct}%)`,
+    "",
+    "*Reply Classification (LLM, total)*",
     `\u2022 Fetched: ${totals.replies_fetched}`,
     `\u2022 Hot: ${totals.hot_count}  |  Soft: ${totals.soft_count}  |  Objection: ${totals.objection_count}  |  Negative: ${totals.negative_count} (rate \u2248 ${nr.toFixed(2)}%)`
   ].join("\n");

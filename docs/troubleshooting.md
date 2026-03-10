@@ -28,39 +28,39 @@ The agent can still complete and deliver a reply after some retries; the log jus
 
 **What to do:** Nothing. This is expected. Socket reconnects (`[slack] socket mode connected`) and the new config is active.
 
-## Kiểm tra skill / sub-agent đang chạy (apollo, bouncer, v.v.)
+## Checking skill / sub-agent status (apollo, bouncer, etc.)
 
-Khi bot báo "skill đang được xử lý trong phiên phụ (sub-agent)" và sẽ gửi kết quả sau, bạn có thể tự kiểm tra:
+When the bot says "skill is being processed in a sub-agent session" and will send results later, you can check progress yourself:
 
-### 1. Trong Slack (nhanh nhất)
+### 1. In Slack (fastest)
 
-Gõ trong cùng kênh/DM với bot:
+Type in the same channel/DM with the bot:
 
-- **`/subagents list`** — xem danh sách sub-agent đang chạy (và đã xong). Mỗi dòng có run id, trạng thái.
-- **`/subagents info <runId>`** — thay `<runId>` bằng id từ list; xem chi tiết: status, thời gian, session id, transcript path.
-- **`/subagents log [limit]`** — xem log gần đây của sub-agent (ví dụ `/subagents log 50`).
+- **`/subagents list`** — See the list of sub-agents currently running (and completed). Each row shows run id and status.
+- **`/subagents info <runId>`** — Replace `<runId>` with the id from the list; view details: status, timing, session id, transcript path.
+- **`/subagents log [limit]`** — View recent sub-agent logs (e.g. `/subagents log 50`).
 
-Khi skill xong, sub-agent sẽ "announce" kết quả về kênh — bạn sẽ thấy tin nhắn mới từ bot với kết quả/nghiệm thu. Nếu không thấy sau vài phút, dùng `/subagents list` xem run đó `completed` hay còn `running` / `failed`.
+When the skill finishes, the sub-agent will "announce" the result to the channel — you'll see a new message from the bot with the result. If you don't see it after a few minutes, use `/subagents list` to check if the run is `completed` or still `running` / `failed`.
 
-### 2. Terminal (gateway đang chạy)
+### 2. Terminal (gateway running)
 
-- Mở terminal đang chạy `openclaw gateway`, xem log: khi skill chạy sẽ có dòng kiểu `[agent/embedded]` hoặc skill name; khi xong có thể có `delivered reply to user:...`.
-- **`openclaw status`** — tổng quan gateway, channels, sessions (nếu có).
-- **`openclaw status --deep`** — probe sâu hơn (Slack, channels).
+- Open the terminal running `openclaw gateway`, watch the log: when a skill runs you'll see lines like `[agent/embedded]` or the skill name; when done you may see `delivered reply to user:...`.
+- **`openclaw status`** — Overview of gateway, channels, sessions (if any).
+- **`openclaw status --deep`** — Deeper probe (Slack, channels).
 
-### 3. Nếu mãi không thấy kết quả
+### 3. If you still don't see results
 
-- Chạy **`/subagents list`** trong Slack: nếu run vẫn `running` có thể đang chờ API (Apollo, Bouncer…) hoặc bị treo; nếu `failed` thì xem `/subagents log` hoặc log gateway để biết lỗi.
-- Nhắn bot: "chưa thấy kết quả apollo, kiểm tra giúp" — agent có thể gọi `/subagents list` hoặc `/subagents log` giúp bạn và báo lại.
-- Chạy lại skill: "chạy lại apollo" hoặc "run apollo again".
+- Run **`/subagents list`** in Slack: if the run is still `running`, it may be waiting on APIs (Apollo, Bouncer…) or stuck; if `failed`, check `/subagents log` or gateway logs for the error.
+- Message the bot: "still no apollo result, please check" — the agent can run `/subagents list` or `/subagents log` for you and report back.
+- Re-run the skill: "run apollo again" or "run apollo again".
 
 ## Delivery recovery: not_in_channel
 
 **Log:** `[delivery-recovery] Retry failed for delivery ... An API error occurred: not_in_channel`
 
-**Meaning:** OpenClaw cố gửi tin vào một **channel** Slack nhưng bot **chưa được mời vào channel đó** (hoặc channel ID sai).
+**Meaning:** OpenClaw tried to send a message to a Slack **channel** but the bot **has not been invited to that channel** (or the channel ID is wrong).
 
-**Cách xử lý:** Vào Slack → mở channel đích → mời app/bot vào channel. Delivery đã fail sẽ báo "1 failed"; chỉ ảnh hưởng tin đó.
+**Fix:** In Slack → open the target channel → invite the app/bot to the channel. Failed delivery will report "1 failed"; only that message is affected.
 
 ## MODULE_NOT_FOUND: apollo-search (build-list fails)
 
@@ -88,9 +88,9 @@ Khi skill xong, sub-agent sẽ "announce" kết quả về kênh — bạn sẽ 
 
 **Log:** `[tools] read failed: ENOENT: ... access '.../workspace/skills/apollo/SKILL.md'`
 
-**Meaning:** Agent đọc mô tả skill từ `workspace/skills/<name>/SKILL.md` nhưng file không tồn tại.
+**Meaning:** The agent reads skill descriptions from `workspace/skills/<name>/SKILL.md` but the file does not exist.
 
-**Cách xử lý:** (1) Mỗi skill cần có file **SKILL.md** trong thư mục skill (repo có 5 skill: apollo, bouncer, instantly, report-build, slack-notify). (2) Đảm bảo `agents.defaults.workspace` trỏ tới thư mục workspace chứa các file đó (vd symlink `~/.openclaw/workspace` → repo `workspace/`). (3) Restart gateway sau khi sửa.
+**Fix:** (1) Each skill must have a **SKILL.md** file in its folder (repo has 5 skills: apollo, bouncer, instantly, report-build, slack-notify). (2) Ensure `agents.defaults.workspace` points to the workspace directory containing those files (e.g. symlink `~/.openclaw/workspace` → repo `workspace/`). (3) Restart the gateway after changes.
 
 ## Cannot find module '@openclaw/sdk'
 

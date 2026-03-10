@@ -41,13 +41,18 @@ async function main() {
       soft_count: acc.soft_count + (r.soft_count || 0),
       objection_count: acc.objection_count + (r.objection_count || 0),
       negative_count: acc.negative_count + (r.negative_count || 0),
+      sent: acc.sent + ((r as any).sent || 0),
+      opened: acc.opened + ((r as any).opened || 0),
+      replies: acc.replies + ((r as any).replies || 0),
     }),
-    { person_ids_count: 0, leads_pulled: 0, leads_validated: 0, leads_removed: 0, pushed_ok: 0, pushed_failed: 0, replies_fetched: 0, hot_count: 0, soft_count: 0, objection_count: 0, negative_count: 0 }
+    { person_ids_count: 0, leads_pulled: 0, leads_validated: 0, leads_removed: 0, pushed_ok: 0, pushed_failed: 0, replies_fetched: 0, hot_count: 0, soft_count: 0, objection_count: 0, negative_count: 0, sent: 0, opened: 0, replies: 0 }
   );
 
   const dr = totals.leads_pulled > 0 ? Math.round((totals.leads_validated / totals.leads_pulled) * 1000) / 10 : 0;
   const br = totals.leads_validated + totals.leads_removed > 0 ? Math.round((totals.leads_removed / (totals.leads_validated + totals.leads_removed)) * 10000) / 100 : 0;
   const nr = totals.replies_fetched > 0 ? Math.round((totals.negative_count / totals.replies_fetched) * 10000) / 100 : 0;
+  const openRatePct = totals.sent > 0 ? ((totals.opened / totals.sent) * 100).toFixed(1) : '0';
+  const replyRatePct = totals.sent > 0 ? ((totals.replies / totals.sent) * 100).toFixed(2) : '0';
 
   const text = [
     `*OpenClaw Monthly Report — ${year}-${String(month).padStart(2, '0')}*`,
@@ -60,7 +65,12 @@ async function main() {
     `• Removed: ${totals.leads_removed} (bounce ≈ ${br.toFixed(2)}%)`,
     `• Pushed to Instantly: ${totals.pushed_ok} ok / ${totals.pushed_failed} failed`,
     '',
-    '*Reply Processing (total)*',
+    '*Campaign (Instantly API, total)*',
+    `• Emails sent: ${totals.sent}`,
+    `• Opens: ${totals.opened} (${openRatePct}%)`,
+    `• Replies: ${totals.replies} (${replyRatePct}%)`,
+    '',
+    '*Reply Classification (LLM, total)*',
     `• Fetched: ${totals.replies_fetched}`,
     `• Hot: ${totals.hot_count}  |  Soft: ${totals.soft_count}  |  Objection: ${totals.objection_count}  |  Negative: ${totals.negative_count} (rate ≈ ${nr.toFixed(2)}%)`,
   ].join('\n');

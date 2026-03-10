@@ -21,6 +21,7 @@ Depending on `MODE` environment variable:
 1. Fetch recent replies from Instantly inbox
 2. Classify each reply using OpenAI (hot/soft/objection/negative)
 3. Save to `replies` table with `reply_category` and `category_confidence`
+4. **Hot leads:** Send fixed template reply via Instantly (Design Pickle: Book now + Compare links). Uses `first_name` from leads table.
 
 ### MODE='all'
 Runs both load + fetch/classify in sequence.
@@ -30,7 +31,11 @@ Runs both load + fetch/classify in sequence.
 - `MODE`: 'load' | 'fetch' | 'classify' | 'all' (default: 'all')
 - `INSTANTLY_API_KEY`: Instantly API key (required)
 - `INSTANTLY_CAMPAIGN_ID`: Campaign ID (required)
+- `INSTANTLY_EACCOUNT`: Email account for replies (fallback if API omits eaccount)
 - `OPENAI_API_KEY`: OpenAI API key (required for fetch/classify)
+- **Date filtering (fetch):** Default = today only (0h-24h local). No more pulling all replies.
+  - `FETCH_DATE`: Single day (YYYY-MM-DD), e.g. `FETCH_DATE=2026-03-06`
+  - `FETCH_DATE_FROM` + `FETCH_DATE_TO`: Date range (YYYY-MM-DD)
 
 ## Execute
 
@@ -38,8 +43,14 @@ Runs both load + fetch/classify in sequence.
 # Load verified leads to Instantly
 cd ~/.openclaw && MODE=load node workspace/skills/instantly/index.mjs
 
-# Fetch and classify replies
+# Fetch and classify replies (default: today only)
 cd ~/.openclaw && MODE=fetch node workspace/skills/instantly/index.mjs
+
+# Specific date
+cd ~/.openclaw && FETCH_DATE=2026-03-06 MODE=fetch node workspace/skills/instantly/index.mjs
+
+# Date range
+cd ~/.openclaw && FETCH_DATE_FROM=2026-03-01 FETCH_DATE_TO=2026-03-05 MODE=fetch node workspace/skills/instantly/index.mjs
 
 # Run both
 cd ~/.openclaw && MODE=all node workspace/skills/instantly/index.mjs
@@ -65,5 +76,5 @@ cd ~/.openclaw && MODE=all node workspace/skills/instantly/index.mjs
 
 ## Performance
 
-- **Load**: ~10 leads/second (100ms delay per lead)
+- **Load**: Uses Instantly bulk add API (POST /api/v2/leads/add), max 1000 leads per request. Batches of 1000, 500ms delay between batches.
 - **Fetch/Classify**: ~2 replies/second (500ms delay + LLM call)

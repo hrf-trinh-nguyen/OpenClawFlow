@@ -6,7 +6,7 @@ Skills define _how_ tools work. This file is for _your_ specifics — the stuff 
 
 ## Runnable skills (outbound pipeline)
 
-**You have 5 skills.** When the user asks "what skills do you have", "chạy build-list", "run workflow build-list", etc., **run the pipeline skills** (from `~/.openclaw` with `source .env`).
+**You have 8 skills.** When the user asks "what skills do you have", "run build-list", "run workflow build-list", etc., **run the pipeline skills** (from `~/.openclaw` with `source .env`).
 
 | Name | What it does |
 |------|--------------|
@@ -15,13 +15,16 @@ Skills define _how_ tools work. This file is for _your_ specifics — the stuff 
 | **instantly** | MODE=load: push verified to campaign. MODE=fetch: fetch + classify replies. |
 | `report-build` | Aggregate metrics into daily report text. |
 | `slack-notify` | Send daily report to Slack. |
+| `lead-stats` | Count leads by status; for failed: breakdown by processing_error. |
+| `lead-move` | Move leads from one status to another (FROM_STATUS, TO_STATUS, optional LIMIT). |
+| `lead-delete` | Delete leads by status (DELETE_STATUS, optional LIMIT). Permanent. |
 
 ### Workflows (run in this order)
 
 | Workflow | Steps |
 |----------|--------|
 | **full** | apollo → bouncer → instantly load → instantly fetch → report-build → slack-notify (entire pipeline) |
-| **build-list** | `TARGET_COUNT=100 node workspace/skills/apollo/index.mjs` → `node workspace/skills/bouncer/index.mjs` |
+| **build-list** | `TARGET_COUNT=10 node workspace/skills/apollo/index.mjs` → `node workspace/skills/bouncer/index.mjs` |
 | **load-campaign** | `MODE=load node workspace/skills/instantly/index.mjs` |
 | **process-replies** | `MODE=fetch node workspace/skills/instantly/index.mjs` |
 | **daily-report** | `node workspace/skills/report-build/index.mjs` → `node workspace/skills/slack-notify/index.mjs` |
@@ -30,7 +33,7 @@ Skills define _how_ tools work. This file is for _your_ specifics — the stuff 
 
 **Apollo default filters:** English-speaking US/CA only; 10–50 employees; industries: Marketing & Advertising, Computer Software/Tech, E-commerce, SaaS. Override with `ICP_MARKET=en` (US, UK, AU, CA) or `PERSON_LOCATIONS`, `ORGANIZATION_NUM_EMPLOYEES_RANGES`, `ORGANIZATION_INDUSTRY_TAG_IDS`.
 
-**Report by date:** When user asks "xem report ngày 06/03/2026" or "report ngày 6 tháng 3", parse date to `YYYY-MM-DD` (DD/MM/YYYY → 06/03/2026 = 2026-03-06) and run:
+**Report by date:** When user asks "show report for March 6, 2026" or "report for 6 March", parse date to `YYYY-MM-DD` (DD/MM/YYYY → 06/03/2026 = 2026-03-06) and run:
 ```bash
 REPORT_DATE=2026-03-06 node workspace/skills/report-build/index.mjs
 ```

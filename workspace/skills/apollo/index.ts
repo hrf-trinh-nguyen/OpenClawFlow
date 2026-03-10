@@ -24,7 +24,7 @@ const CONTACT_EMAIL_STATUS = ['verified'];
 
 // ── Configuration ──────────────────────────────────────────────────
 
-const TARGET_COUNT = parseInt(process.env.TARGET_COUNT || '100', 10);
+const TARGET_COUNT = parseInt(process.env.TARGET_COUNT || '5', 10);
 const PERSON_TITLES = process.env.PERSON_TITLES ? JSON.parse(process.env.PERSON_TITLES) : ['vp marketing', 'head of marketing', 'vp sales', 'director of marketing', 'director of sales'];
 const ORGANIZATION_INDUSTRY_TAG_IDS_FINAL = process.env.ORGANIZATION_INDUSTRY_TAG_IDS ? JSON.parse(process.env.ORGANIZATION_INDUSTRY_TAG_IDS) : ORGANIZATION_INDUSTRY_TAG_IDS;
 const APOLLO_API_KEY = process.env.APOLLO_API_KEY;

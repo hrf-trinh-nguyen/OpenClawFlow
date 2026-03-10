@@ -142,7 +142,13 @@ async function insertNewLeads(client, leads, options) {
   if (leads.length === 0) return { inserted: 0, skippedExisting: 0, skippedDuplicate: 0 };
   const emails = leads.map((l) => l.email).filter((e) => e && typeof e === "string");
   const existing = await getExistingEmails(client, emails);
-  const newLeads = leads.filter((l) => l.email && !existing.has(l.email.trim().toLowerCase()));
+  const blacklistRes = await client.query(
+    `SELECT LOWER(TRIM(email)) as email FROM leads WHERE blacklisted = true AND email IS NOT NULL`
+  );
+  const blacklisted = new Set(blacklistRes.rows.map((r) => r.email));
+  const newLeads = leads.filter(
+    (l) => l.email && !existing.has(l.email.trim().toLowerCase()) && !blacklisted.has(l.email.trim().toLowerCase())
+  );
   const skippedExisting = leads.length - newLeads.length;
   if (newLeads.length === 0) {
     return { inserted: 0, skippedExisting, skippedDuplicate: 0 };
@@ -185,7 +191,7 @@ var ORGANIZATION_LOCATIONS = ["United States", "Canada"];
 var ORGANIZATION_NUM_EMPLOYEES_RANGES = ["11,20", "21,50"];
 var ORGANIZATION_INDUSTRY_TAG_IDS = ["5567cd4e7369643b70010000", "5567cd467369644d39040000", "5567ced173696450cb580000"];
 var CONTACT_EMAIL_STATUS = ["verified"];
-var TARGET_COUNT = parseInt(process.env.TARGET_COUNT || "100", 10);
+var TARGET_COUNT = parseInt(process.env.TARGET_COUNT || "5", 10);
 var PERSON_TITLES = process.env.PERSON_TITLES ? JSON.parse(process.env.PERSON_TITLES) : ["vp marketing", "head of marketing", "vp sales", "director of marketing", "director of sales"];
 var ORGANIZATION_INDUSTRY_TAG_IDS_FINAL = process.env.ORGANIZATION_INDUSTRY_TAG_IDS ? JSON.parse(process.env.ORGANIZATION_INDUSTRY_TAG_IDS) : ORGANIZATION_INDUSTRY_TAG_IDS;
 var APOLLO_API_KEY = process.env.APOLLO_API_KEY;

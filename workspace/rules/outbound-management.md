@@ -34,7 +34,8 @@ report-build → slack-notify  (workflow: daily-report)
 | 6:00 AM  | build-list      | apollo → bouncer                                   |
 | 6:30 AM  | load-campaign   | instantly (MODE=load)                              |
 | 9–5 PM   | (Instantly UI)  | Sending window (autopilot)                         |
-| 6:00 PM  | process-replies | instantly (MODE=fetch)                             |
+| 6:00 PM  | process-replies | instantly (MODE=fetch): classify + reply hot       |
+| 8:00 PM  | process-replies | same (6–9:30 window)                              |
 | 10:00 PM | daily-report    | report-build → slack-notify                         |
 
 ## List Building Rules

@@ -9,13 +9,13 @@ export function getDb(): Pool | null {
     console.warn('⚠️  SUPABASE_DB_URL not found in env');
     return null;
   }
-  
+
   if (!pool) {
     const connString = process.env.SUPABASE_DB_URL.trim().replace(/^['"]|['"]$/g, '');
     pool = new Pool({ connectionString: connString });
     console.log('✅ PostgreSQL connection pool created');
   }
-  
+
   return pool;
 }
 
@@ -235,8 +235,8 @@ export interface InsertLeadsResult {
 }
 
 /**
- * Insert only NEW leads (skip emails already in DB).
- * Dedupe by email before calling - skippedDuplicate is for caller to track.
+ * Insert only NEW leads (skip emails already in DB, including blacklisted).
+ * Dedupe by email before calling - skippedExisting is for caller to track.
  * Returns { inserted, skippedExisting, skippedDuplicate }.
  */
 export async function insertNewLeads(
@@ -248,7 +248,17 @@ export async function insertNewLeads(
 
   const emails = leads.map((l) => l.email).filter((e) => e && typeof e === 'string');
   const existing = await getExistingEmails(client, emails);
-  const newLeads = leads.filter((l) => l.email && !existing.has(l.email.trim().toLowerCase()));
+  // Also skip blacklisted emails (never re-add)
+  const blacklistRes = await client.query(
+    `SELECT LOWER(TRIM(email)) as email FROM leads WHERE blacklisted = true AND email IS NOT NULL`
+  );
+  const blacklisted = new Set(blacklistRes.rows.map((r) => r.email));
+  const newLeads = leads.filter(
+    (l) =>
+      l.email &&
+      !existing.has(l.email.trim().toLowerCase()) &&
+      !blacklisted.has(l.email.trim().toLowerCase())
+  );
   const skippedExisting = leads.length - newLeads.length;
 
   if (newLeads.length === 0) {
@@ -312,6 +322,28 @@ export async function getLeadsByStatus(
      ORDER BY priority DESC, created_at ASC
      LIMIT $2`,
     [status, limit]
+  );
+  return result.rows;
+}
+
+/**
+ * Get leads ready for campaign load: bouncer_verified, not blacklisted.
+ * To re-enable 45-day cooldown, add: AND (last_contacted_at IS NULL OR last_contacted_at < NOW() - INTERVAL '45 days')
+ */
+export async function getLeadsReadyForCampaign(
+  client: DbClient,
+  limit: number = 10000
+): Promise<Lead[]> {
+  const result = await client.query(
+    `SELECT id, apollo_person_id, first_name, last_name, email, company_name,
+            title, linkedin_url, email_status, processing_status,
+            processing_error, batch_id, priority
+     FROM leads
+     WHERE processing_status = 'bouncer_verified'
+       AND (blacklisted = false OR blacklisted IS NULL)
+     ORDER BY priority DESC, created_at ASC
+     LIMIT $1`,
+    [limit]
   );
   return result.rows;
 }
@@ -452,21 +484,39 @@ export async function getMetricsForReport(
   );
   metrics.replies_fetched = Number(repliesRes.rows[0]?.cnt) || 0;
 
-  // Reply classifications by category
-  const classRes = await client.query(
-    `SELECT rc.category, COUNT(*)::int as cnt
-     FROM reply_classifications rc
-     JOIN replies r ON rc.reply_id = r.id
-     WHERE rc.classified_at::date = $1::date
-     GROUP BY rc.category`,
+  // Reply classifications: prefer replies.reply_category (Instantly skill) else reply_classifications
+  const repliesClassRes = await client.query(
+    `SELECT reply_category as category, COUNT(*)::int as cnt
+     FROM replies
+     WHERE reply_category IS NOT NULL AND classified_at::date = $1::date
+     GROUP BY reply_category`,
     [reportDate]
   );
-  for (const row of classRes.rows) {
-    const c = Number(row.cnt) || 0;
-    if (row.category === 'hot') metrics.hot_count = c;
-    else if (row.category === 'soft') metrics.soft_count = c;
-    else if (row.category === 'objection') metrics.objection_count = c;
-    else if (row.category === 'negative') metrics.negative_count = c;
+  if (repliesClassRes.rows.length > 0) {
+    for (const row of repliesClassRes.rows) {
+      const c = Number(row.cnt) || 0;
+      if (row.category === 'hot') metrics.hot_count = c;
+      else if (row.category === 'soft') metrics.soft_count = c;
+      else if (row.category === 'objection') metrics.objection_count = c;
+      else if (row.category === 'negative') metrics.negative_count = c;
+    }
+  } else {
+    // Fallback: legacy reply_classifications table
+    const classRes = await client.query(
+      `SELECT rc.category, COUNT(*)::int as cnt
+       FROM reply_classifications rc
+       JOIN replies r ON rc.reply_id = r.id
+       WHERE rc.classified_at::date = $1::date
+       GROUP BY rc.category`,
+      [reportDate]
+    );
+    for (const row of classRes.rows) {
+      const c = Number(row.cnt) || 0;
+      if (row.category === 'hot') metrics.hot_count = c;
+      else if (row.category === 'soft') metrics.soft_count = c;
+      else if (row.category === 'objection') metrics.objection_count = c;
+      else if (row.category === 'negative') metrics.negative_count = c;
+    }
   }
 
   // Rates
@@ -488,16 +538,28 @@ export async function upsertDailyReport(
   reportDate: string,
   metrics: ReportMetrics,
   reportJson: Record<string, any>,
-  pipelineRunId?: string | null
+  options?: {
+    pipelineRunId?: string | null;
+    campaignId?: string | null;
+    sent?: number;
+    opened?: number;
+    replies?: number;
+  }
 ): Promise<void> {
+  const campaignId = options?.campaignId ?? null;
+  const sent = options?.sent ?? 0;
+  const opened = options?.opened ?? 0;
+  const replies = options?.replies ?? 0;
+
   await client.query(
     `INSERT INTO daily_reports (
-       report_date, pipeline_run_id, person_ids_count, leads_pulled, leads_validated, leads_removed,
+       report_date, pipeline_run_id, campaign_id, person_ids_count, leads_pulled, leads_validated, leads_removed,
        pushed_ok, pushed_failed, replies_fetched, hot_count, soft_count, objection_count, negative_count,
-       deliverable_rate, bounce_rate, spam_complaint_rate, report_json)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+       deliverable_rate, bounce_rate, spam_complaint_rate, sent, opened, replies, report_json)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
      ON CONFLICT (report_date) DO UPDATE SET
        pipeline_run_id = COALESCE(EXCLUDED.pipeline_run_id, daily_reports.pipeline_run_id),
+       campaign_id = COALESCE(EXCLUDED.campaign_id, daily_reports.campaign_id),
        person_ids_count = EXCLUDED.person_ids_count, leads_pulled = EXCLUDED.leads_pulled,
        leads_validated = EXCLUDED.leads_validated, leads_removed = EXCLUDED.leads_removed,
        pushed_ok = EXCLUDED.pushed_ok, pushed_failed = EXCLUDED.pushed_failed,
@@ -505,10 +567,12 @@ export async function upsertDailyReport(
        soft_count = EXCLUDED.soft_count, objection_count = EXCLUDED.objection_count,
        negative_count = EXCLUDED.negative_count, deliverable_rate = EXCLUDED.deliverable_rate,
        bounce_rate = EXCLUDED.bounce_rate, spam_complaint_rate = EXCLUDED.spam_complaint_rate,
+       sent = EXCLUDED.sent, opened = EXCLUDED.opened, replies = EXCLUDED.replies,
        report_json = EXCLUDED.report_json`,
     [
       reportDate,
-      pipelineRunId ?? null,
+      options?.pipelineRunId ?? null,
+      campaignId,
       metrics.person_ids_count,
       metrics.leads_pulled,
       metrics.leads_validated,
@@ -523,7 +587,70 @@ export async function upsertDailyReport(
       metrics.deliverable_rate,
       metrics.bounce_rate,
       metrics.spam_complaint_rate,
+      sent,
+      opened,
+      replies,
       JSON.stringify(reportJson),
+    ]
+  );
+}
+
+/** Upsert campaign_daily_analytics (Instantly API data per campaign per day). */
+export async function upsertCampaignDailyAnalytics(
+  client: DbClient,
+  reportDate: string,
+  campaignId: string,
+  data: {
+    sent: number;
+    contacted?: number;
+    new_leads_contacted?: number;
+    opened?: number;
+    unique_opened?: number;
+    replies?: number;
+    unique_replies?: number;
+    replies_automatic?: number;
+    unique_replies_automatic?: number;
+    clicks?: number;
+    unique_clicks?: number;
+  }
+): Promise<void> {
+  const contacted = data.contacted ?? 0;
+  const newLeadsContacted = data.new_leads_contacted ?? 0;
+  const opened = data.opened ?? 0;
+  const uniqueOpened = data.unique_opened ?? data.opened ?? 0;
+  const replies = data.replies ?? 0;
+  const uniqueReplies = data.unique_replies ?? data.replies ?? 0;
+  const repliesAutomatic = data.replies_automatic ?? 0;
+  const uniqueRepliesAutomatic = data.unique_replies_automatic ?? 0;
+  const clicks = data.clicks ?? 0;
+  const uniqueClicks = data.unique_clicks ?? 0;
+
+  await client.query(
+    `INSERT INTO campaign_daily_analytics (
+       report_date, campaign_id, sent, contacted, new_leads_contacted,
+       opened, unique_opened, replies, unique_replies, replies_automatic, unique_replies_automatic,
+       clicks, unique_clicks, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+     ON CONFLICT (report_date, campaign_id) DO UPDATE SET
+       sent = EXCLUDED.sent, contacted = EXCLUDED.contacted, new_leads_contacted = EXCLUDED.new_leads_contacted,
+       opened = EXCLUDED.opened, unique_opened = EXCLUDED.unique_opened,
+       replies = EXCLUDED.replies, unique_replies = EXCLUDED.unique_replies,
+       replies_automatic = EXCLUDED.replies_automatic, unique_replies_automatic = EXCLUDED.unique_replies_automatic,
+       clicks = EXCLUDED.clicks, unique_clicks = EXCLUDED.unique_clicks, updated_at = NOW()`,
+    [
+      reportDate,
+      campaignId,
+      data.sent,
+      contacted,
+      newLeadsContacted,
+      opened,
+      uniqueOpened,
+      replies,
+      uniqueReplies,
+      repliesAutomatic,
+      uniqueRepliesAutomatic,
+      clicks,
+      uniqueClicks,
     ]
   );
 }
@@ -533,12 +660,13 @@ export async function getDailyReportsByMonth(
   client: DbClient,
   year: number,
   month: number
-): Promise<Array<ReportMetrics & { report_date: string }>> {
+): Promise<Array<ReportMetrics & { report_date: string; sent?: number; opened?: number; replies?: number }>> {
   const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
   const result = await client.query(
-    `SELECT report_date::text, person_ids_count, leads_pulled, leads_validated, leads_removed,
+    `SELECT report_date::text, campaign_id, person_ids_count, leads_pulled, leads_validated, leads_removed,
             pushed_ok, pushed_failed, replies_fetched, hot_count, soft_count, objection_count, negative_count,
-            deliverable_rate, bounce_rate, spam_complaint_rate
+            deliverable_rate, bounce_rate, spam_complaint_rate,
+            COALESCE(sent, 0) as sent, COALESCE(opened, 0) as opened, COALESCE(replies, 0) as replies
      FROM daily_reports
      WHERE report_date >= $1::date AND report_date < $1::date + INTERVAL '1 month'
      ORDER BY report_date ASC`,
@@ -560,6 +688,9 @@ export async function getDailyReportsByMonth(
     deliverable_rate: Number(r.deliverable_rate) || 0,
     bounce_rate: Number(r.bounce_rate) || 0,
     spam_complaint_rate: Number(r.spam_complaint_rate) || 0,
+    sent: Number(r.sent) || 0,
+    opened: Number(r.opened) || 0,
+    replies: Number(r.replies) || 0,
   }));
 }
 

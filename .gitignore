@@ -6,6 +6,9 @@ workspace/.env
 # Backup (if ever copied in)
 .openclaw.bak
 
+# Build / temp
+supabase/.temp/
+
 # Runtime / state (OpenClaw sessions, cron runs, delivery queue)
 agents/
 state/
@@ -16,7 +19,10 @@ devices/
 subagents/
 identity/
 memory/
+docs/
 update-check.json
+
+
 
 # Workspace runtime
 workspace/.openclaw/

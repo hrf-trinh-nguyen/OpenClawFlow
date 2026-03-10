@@ -3,12 +3,12 @@
 /**
  * report-build — aggregate metrics from DB and save daily report
  *
- * Reads:  pipeline_runs, service_executions, replies, reply_classifications (by date)
- * Writes: daily_reports table, state/daily_report.json, state/daily_report_text
+ * Reads:  pipeline_runs, service_executions, replies (by date), Instantly API
+ * Writes: daily_reports, campaign_daily_analytics, state/daily_report.json
  *
- * Run from ~/.openclaw: node workspace/skills/report-build/index.mjs
- *
- * ENV: REPORT_DATE (optional, default: today, format YYYY-MM-DD)
+ * ENV: REPORT_DATE (default: today)
+ *      INSTANTLY_API_KEY
+ *      INSTANTLY_CAMPAIGN_ID (single) or INSTANTLY_CAMPAIGN_IDS (comma-separated)
  */
 
 import { stateSet } from '../../lib/state.js';
@@ -16,7 +16,63 @@ import {
   getDb,
   getMetricsForReport,
   upsertDailyReport,
+  upsertCampaignDailyAnalytics,
 } from '../../lib/supabase-pipeline.js';
+
+/** Instantly daily campaign analytics response row */
+interface InstantlyDailyRow {
+  date?: string;
+  sent?: number;
+  contacted?: number;
+  new_leads_contacted?: number;
+  opened?: number;
+  unique_opened?: number;
+  replies?: number;
+  unique_replies?: number;
+  replies_automatic?: number;
+  unique_replies_automatic?: number;
+  clicks?: number;
+  unique_clicks?: number;
+}
+
+/** Get campaign IDs from env: INSTANTLY_CAMPAIGN_IDS (comma) or INSTANTLY_CAMPAIGN_ID */
+function getCampaignIds(): string[] {
+  const ids = process.env.INSTANTLY_CAMPAIGN_IDS;
+  if (ids) {
+    return ids.split(',').map((s) => s.trim()).filter(Boolean);
+  }
+  const id = process.env.INSTANTLY_CAMPAIGN_ID;
+  return id ? [id] : [];
+}
+
+/** Fetch daily campaign analytics from Instantly API v2 */
+async function fetchInstantlyDailyAnalytics(
+  reportDate: string,
+  campaignId: string
+): Promise<InstantlyDailyRow | null> {
+  const apiKey = process.env.INSTANTLY_API_KEY;
+  if (!apiKey) return null;
+
+  const params = new URLSearchParams({
+    campaign_id: campaignId,
+    start_date: reportDate,
+    end_date: reportDate
+  });
+  const url = `https://api.instantly.ai/api/v2/campaigns/analytics/daily?${params}`;
+
+  try {
+    const res = await fetch(url, {
+      headers: { 'Authorization': `Bearer ${apiKey}` }
+    });
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    const rows = Array.isArray(data) ? data : data.items ?? [];
+    return rows.find((r: InstantlyDailyRow) => r.date === reportDate) ?? rows[0] ?? null;
+  } catch {
+    return null;
+  }
+}
 
 async function main() {
   const startTime = Date.now();
@@ -31,6 +87,36 @@ async function main() {
   }
 
   const metrics = await getMetricsForReport(db, reportDate);
+  const campaignIds = getCampaignIds();
+
+  let primaryCampaignId: string | null = null;
+  let sent = 0, opened = 0, repliesInst = 0;
+
+  for (const cid of campaignIds) {
+    const row = await fetchInstantlyDailyAnalytics(reportDate, cid);
+    if (!row) continue;
+
+    await upsertCampaignDailyAnalytics(db, reportDate, cid, {
+      sent: row.sent ?? 0,
+      contacted: row.contacted ?? 0,
+      new_leads_contacted: row.new_leads_contacted ?? 0,
+      opened: row.opened ?? 0,
+      unique_opened: row.unique_opened ?? row.opened ?? 0,
+      replies: row.replies ?? 0,
+      unique_replies: row.unique_replies ?? row.replies ?? 0,
+      replies_automatic: row.replies_automatic ?? 0,
+      unique_replies_automatic: row.unique_replies_automatic ?? 0,
+      clicks: row.clicks ?? 0,
+      unique_clicks: row.unique_clicks ?? 0,
+    });
+
+    if (!primaryCampaignId) {
+      primaryCampaignId = cid;
+      sent = row.sent ?? 0;
+      opened = row.unique_opened ?? row.opened ?? 0;
+      repliesInst = row.unique_replies ?? row.replies ?? 0;
+    }
+  }
 
   const person_ids_count = metrics.person_ids_count ?? 0;
   const leads_pulled = metrics.leads_pulled ?? 0;
@@ -47,8 +133,12 @@ async function main() {
   const br = Number(metrics.bounce_rate) || 0;
   const nr = replies_fetched > 0 ? Math.round((negative_count / replies_fetched) * 10000) / 100 : 0;
 
+  const openRatePct = sent > 0 ? ((opened / sent) * 100).toFixed(1) : '0';
+  const replyRatePct = sent > 0 ? ((repliesInst / sent) * 100).toFixed(2) : '0';
+
   const report = {
     date: reportDate,
+    campaign_id: primaryCampaignId,
     apollo: {
       person_ids: person_ids_count,
       leads_with_email: leads_pulled,
@@ -59,9 +149,18 @@ async function main() {
       deliverable_rate: `${dr.toFixed(1)}%`,
       bounce_rate: `${br.toFixed(2)}%`,
     },
-    instantly: { pushed_ok, pushed_failed },
+    instantly: {
+      pushed_ok,
+      pushed_failed,
+      sent,
+      opened,
+      replies: repliesInst,
+      open_rate_pct: openRatePct,
+      reply_rate_pct: replyRatePct,
+    },
     replies: {
-      fetched: replies_fetched,
+      total: repliesInst,
+      classified: replies_fetched,
       hot: hot_count,
       soft: soft_count,
       objection: objection_count,
@@ -72,6 +171,7 @@ async function main() {
 
   const text = [
     `*OpenClaw Daily Report — ${reportDate}*`,
+    primaryCampaignId ? `Campaign: ${primaryCampaignId.slice(0, 8)}...` : '',
     '',
     '*Lead Pipeline*',
     `• Apollo IDs found: ${person_ids_count}`,
@@ -80,12 +180,21 @@ async function main() {
     `• Removed: ${leads_removed} (bounce/invalid ≈ ${br.toFixed(2)}%)`,
     `• Pushed to Instantly: ${pushed_ok} ok / ${pushed_failed} failed`,
     '',
-    '*Reply Processing*',
-    `• Fetched: ${replies_fetched}`,
-    `• Hot: ${hot_count}  |  Soft: ${soft_count}  |  Objection: ${objection_count}  |  Negative: ${negative_count} (rate ≈ ${nr.toFixed(2)}%)`,
-  ].join('\n');
+    '*Campaign (Instantly API)*',
+    `• Emails sent: ${sent}`,
+    `• Opens: ${opened} (${openRatePct}%)`,
+    `• Replies: ${repliesInst} (${replyRatePct}%)`,
+    replies_fetched > 0
+      ? ['', '*Reply Classification (LLM)*', `• Hot: ${hot_count}  |  Soft: ${soft_count}  |  Objection: ${objection_count}  |  Negative: ${negative_count} (${nr.toFixed(2)}%)`].join('\n')
+      : '',
+  ].filter(Boolean).join('\n');
 
-  await upsertDailyReport(db, reportDate, metrics, report);
+  await upsertDailyReport(db, reportDate, metrics, report, {
+    campaignId: primaryCampaignId,
+    sent,
+    opened,
+    replies: repliesInst,
+  });
   stateSet('daily_report', report);
   stateSet('daily_report_text', text);
 

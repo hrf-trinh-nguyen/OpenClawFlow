@@ -154,7 +154,7 @@ async function batchUpdateLeadStatus(client, leadIds, newStatus, errorMessage) {
 
 // skills/bouncer/index.ts
 var BOUNCER_API_KEY = process.env.BOUNCER_API_KEY;
-var BOUNCER_BATCH_SIZE = parseInt(process.env.BOUNCER_BATCH_SIZE || "100", 10);
+var BOUNCER_BATCH_SIZE = Math.min(1e3, Math.max(1, parseInt(process.env.BOUNCER_BATCH_SIZE || "1000", 10)));
 if (!BOUNCER_API_KEY) {
   console.error("\u274C BOUNCER_API_KEY not found in env");
   process.exit(1);

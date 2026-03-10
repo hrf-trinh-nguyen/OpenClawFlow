@@ -9,7 +9,7 @@
  * 
  * ENV variables:
  * - BOUNCER_API_KEY: Bouncer API key
- * - BOUNCER_BATCH_SIZE: batch size (default: 100, max: 100)
+ * - BOUNCER_BATCH_SIZE: batch size (default: 1000, max: 1000 per Bouncer rate limit)
  * - SUPABASE_DB_URL: PostgreSQL connection string
  */
 
@@ -18,7 +18,7 @@ import { getDb, createPipelineRun, updatePipelineRun, createServiceExecution, up
 // ── Configuration ──────────────────────────────────────────────────
 
 const BOUNCER_API_KEY = process.env.BOUNCER_API_KEY;
-const BOUNCER_BATCH_SIZE = parseInt(process.env.BOUNCER_BATCH_SIZE || '100', 10);
+const BOUNCER_BATCH_SIZE = Math.min(1000, Math.max(1, parseInt(process.env.BOUNCER_BATCH_SIZE || '1000', 10)));
 
 if (!BOUNCER_API_KEY) {
   console.error('❌ BOUNCER_API_KEY not found in env');

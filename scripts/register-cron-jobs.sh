@@ -23,6 +23,9 @@ openclaw cron add --name "6:30AM - Load Campaign" --cron "30 6 * * *" --tz "Asia
 openclaw cron add --name "6PM - Process Replies" --cron "0 18 * * *" --tz "Asia/Ho_Chi_Minh" \
   --session isolated --no-deliver --message "Run workflow: process-replies"
 
+openclaw cron add --name "8PM - Process Replies" --cron "0 20 * * *" --tz "Asia/Ho_Chi_Minh" \
+  --session isolated --no-deliver --message "Run workflow: process-replies"
+
 # 10PM: deliver report to Slack
 openclaw cron add --name "10PM - Daily Report" --cron "0 22 * * *" --tz "Asia/Ho_Chi_Minh" \
   --session isolated --message "Run workflow: daily-report" \

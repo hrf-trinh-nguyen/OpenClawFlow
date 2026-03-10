@@ -18,7 +18,7 @@ Combines `apollo-search` + `apollo-match` into one autonomous service.
 
 ## Parameters (ENV variables)
 
-- `TARGET_COUNT`: number of leads to collect (default: 100)
+- `TARGET_COUNT`: number of leads to collect (default: 100). Agent parses from user message (e.g. "get 5 leads" → TARGET_COUNT=5).
 - `PERSON_TITLES`: JSON array of job titles (default: VP/director marketing & sales)
 - `PERSON_LOCATIONS`: JSON array; overridden by `ICP_MARKET` if set
 - `ICP_MARKET`: `en` = US, UK, AU, CA | `us_ca` = US & Canada only (default)

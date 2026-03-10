@@ -22,9 +22,15 @@ Daily run schedule for OpenClaw outbound automation. Use **workflows** for multi
 ## 6:00 PM – Process Replies
 
 - **Workflow:** `process-replies`
-- Skills: instantly (MODE=fetch, includes classify)
-- Fetch replies from Instantly inbox, classify via LLM
+- Skills: instantly (MODE=fetch, includes classify + hot reply)
+- Fetch replies from Instantly inbox, classify via LLM (hot/soft/objection/negative)
+- **Hot leads:** Send fixed template reply with Book now + Compare links (Design Pickle)
 - Log hot/soft/objection/negative counts; escalate if negative rate > 10%
+
+## 8:00 PM – Process Replies (repeat)
+
+- Same workflow as 6 PM — catches replies from 6–9:30 PM window
+- Fetch + classify + reply hot
 
 ## 10:00 PM – Daily Report
 

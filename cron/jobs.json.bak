@@ -23,7 +23,8 @@
         "channel": "last"
       },
       "state": {
-        "nextRunAtMs": 1772838000000
+        "nextRunAtMs": 1773010800000,
+        "runningAtMs": 1773111651297
       }
     },
     {
@@ -48,7 +49,8 @@
         "channel": "last"
       },
       "state": {
-        "nextRunAtMs": 1772839800000
+        "nextRunAtMs": 1773012600000,
+        "runningAtMs": 1773111651297
       }
     },
     {
@@ -56,7 +58,7 @@
       "name": "6PM - Process Replies",
       "enabled": true,
       "createdAtMs": 1772788602788,
-      "updatedAtMs": 1772788602788,
+      "updatedAtMs": 1772896067131,
       "schedule": {
         "kind": "cron",
         "expr": "0 18 * * *",
@@ -73,7 +75,49 @@
         "channel": "last"
       },
       "state": {
-        "nextRunAtMs": 1772794800000
+        "nextRunAtMs": 1773054000000,
+        "lastRunAtMs": 1772896054703,
+        "lastRunStatus": "ok",
+        "lastStatus": "ok",
+        "lastDurationMs": 12428,
+        "lastDelivered": false,
+        "lastDeliveryStatus": "not-delivered",
+        "consecutiveErrors": 0,
+        "runningAtMs": 1773111651297
+      }
+    },
+    {
+      "id": "82262b9e-6e42-447f-9e7a-c416015500fb",
+      "name": "10PM - Daily Report",
+      "enabled": true,
+      "createdAtMs": 1772788603877,
+      "updatedAtMs": 1772989408890,
+      "schedule": {
+        "kind": "cron",
+        "expr": "0 22 * * *",
+        "tz": "Asia/Ho_Chi_Minh"
+      },
+      "sessionTarget": "isolated",
+      "wakeMode": "now",
+      "payload": {
+        "kind": "agentTurn",
+        "message": "Run workflow: daily-report"
+      },
+      "delivery": {
+        "mode": "announce",
+        "channel": "slack",
+        "to": "channel:C0A720WG11N"
+      },
+      "state": {
+        "nextRunAtMs": 1773068400000,
+        "lastRunAtMs": 1772989371946,
+        "lastRunStatus": "ok",
+        "lastStatus": "ok",
+        "lastDurationMs": 36944,
+        "lastDelivered": true,
+        "lastDeliveryStatus": "delivered",
+        "consecutiveErrors": 0,
+        "runningAtMs": 1773111651297
       }
     }
   ]

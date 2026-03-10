@@ -6,7 +6,7 @@
  * Requires in .env (at repo root): SUPABASE_DB_URL
  */
 
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import pg from 'pg';
@@ -14,7 +14,8 @@ import pg from 'pg';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, '..', '..');
 const envPath = join(repoRoot, '.env');
-const migrationPath = join(repoRoot, 'supabase', 'migrations', '001_initial_schema.sql');
+const migrationsDir = join(repoRoot, 'supabase', 'migrations');
+const migrationArg = process.argv[2] || '009';
 
 function loadEnv() {
   if (!existsSync(envPath)) return {};
@@ -22,7 +23,12 @@ function loadEnv() {
   const out = {};
   for (const line of content.split('\n')) {
     const m = line.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
-    if (m) out[m[1].trim()] = m[2].trim();
+    if (m) {
+      let v = m[2].trim();
+      if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'")))
+        v = v.slice(1, -1);
+      out[m[1].trim()] = v;
+    }
   }
   return out;
 }
@@ -38,6 +44,14 @@ if (!url) {
   process.exit(1);
 }
 
+// Resolve migration: 009 -> 009_replies_auto_replied.sql
+let migrationFile = migrationArg;
+if (!migrationFile.endsWith('.sql')) {
+  const files = readdirSync(migrationsDir).filter((f) => f.startsWith(migrationArg + '_') && f.endsWith('.sql'));
+  migrationFile = files[0] || migrationArg + '.sql';
+}
+const migrationPath = join(migrationsDir, migrationFile);
+
 if (!existsSync(migrationPath)) {
   console.error('Migration file not found:', migrationPath);
   process.exit(1);
@@ -50,7 +64,7 @@ async function run() {
   try {
     await client.connect();
     await client.query(sql);
-    console.log('Migration applied: 001_initial_schema.sql');
+    console.log('Migration applied:', migrationFile);
   } catch (err) {
     console.error('Migration failed:', err.message);
     process.exit(1);

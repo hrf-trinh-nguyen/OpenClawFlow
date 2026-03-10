@@ -5,7 +5,25 @@
       "model": "openai/gpt-5.1",
       "compaction": {
         "mode": "safeguard"
+      },
+      "elevatedDefault": "full"
+    }
+  },
+  "tools": {
+    "elevated": {
+      "enabled": true,
+      "allowFrom": {
+        "slack": [
+          "U091B2492SX",
+          "U088DMSLFC7",
+          "U08FLNSDQ78"
+        ]
       }
+    },
+    "exec": {
+      "host": "gateway",
+      "security": "full",
+      "ask": "off"
     }
   },
   "commands": {
@@ -15,7 +33,7 @@
     "ownerDisplay": "raw"
   },
   "cron": {
-    "enabled": true,
+    "enabled": false,
     "store": "~/.openclaw/cron/jobs.json",
     "maxConcurrentRuns": 1,
     "sessionRetention": "24h",
@@ -35,8 +53,18 @@
       "groupPolicy": "allowlist",
       "dmPolicy": "allowlist",
       "allowFrom": [
-        "U091B2492SX"
+        "U091B2492SX",
+        "U088DMSLFC7",
+        "U08FLNSDQ78"
       ],
+      "channels": {
+        "C0A720WG11N": {
+          "allow": true
+        },
+        "*": {
+          "requireMention": true
+        }
+      },
       "nativeStreaming": true,
       "streaming": "partial",
       "commands": {
@@ -88,6 +116,27 @@
         "enabled": true,
         "env": {
           "SLACK_CHANNEL": "${SLACK_REPORT_CHANNEL}",
+          "OPENCLAW_STATE_DIR": "${OPENCLAW_STATE_DIR}"
+        }
+      },
+      "lead-stats": {
+        "enabled": true,
+        "env": {
+          "SUPABASE_DB_URL": "${SUPABASE_DB_URL}",
+          "OPENCLAW_STATE_DIR": "${OPENCLAW_STATE_DIR}"
+        }
+      },
+      "lead-move": {
+        "enabled": true,
+        "env": {
+          "SUPABASE_DB_URL": "${SUPABASE_DB_URL}",
+          "OPENCLAW_STATE_DIR": "${OPENCLAW_STATE_DIR}"
+        }
+      },
+      "lead-delete": {
+        "enabled": true,
+        "env": {
+          "SUPABASE_DB_URL": "${SUPABASE_DB_URL}",
           "OPENCLAW_STATE_DIR": "${OPENCLAW_STATE_DIR}"
         }
       }
