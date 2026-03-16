@@ -17,9 +17,20 @@ Rules for the build-list skill pipeline.
 4. **Filter** – Keep only `status === "deliverable"`, discard undeliverable/unknown
 5. **Save** – Write valid leads to state for load-campaign
 
+## Daily Target — MUST reach 200 bouncer_verified
+
+**Each day the build-list workflow MUST collect 200 leads with `bouncer_verified` status.**
+
+- Run apollo → bouncer in a loop until the total `bouncer_verified` count for the day reaches **200**
+- Do NOT stop after a single pass if fewer than 200 leads are verified
+- Each loop: pull the next batch from Apollo (100/batch), run Bouncer verify, check DB count
+- Query to check progress: `SELECT COUNT(*) FROM leads WHERE processing_status='bouncer_verified' AND DATE(created_at) = CURRENT_DATE;`
+- Only stop when `bouncer_verified` count ≥ 200
+- If Apollo returns no more results: log warning, report to `C0ALRRHK61X`, stop gracefully
+
 ## Limits & Guardrails
 
-- Max 100 leads per run (configurable via batch_size)
+- Batch size: 100 leads per Apollo pull (loop until daily target met)
 - Max 500 new contacts per campaign per day
 - Never contact someone emailed in last 45 days
 - If invalid rate > 30%: log warning, review ICP filters

@@ -28,6 +28,23 @@ The agent can still complete and deliver a reply after some retries; the log jus
 
 **What to do:** Nothing. This is expected. Socket reconnects (`[slack] socket mode connected`) and the new config is active.
 
+## Gateway receives SIGTERM and shuts down immediately
+
+**Log:** `[gateway] signal SIGTERM received` then `[gateway] received SIGTERM; shutting down` — gateway exits within 1–2 seconds of startup. Slack may show `WebSocket was closed before the connection was established`.
+
+**Meaning:** Something is sending SIGTERM to the OpenClaw process. The Slack WebSocket error is a *consequence* of shutdown, not the cause.
+
+**Possible causes:**
+1. **Health monitor** — OpenClaw’s health monitor may kill the gateway if it considers Slack connection unhealthy. Try disabling it.
+2. **Another process** — e.g. `pkill openclaw`, a different terminal, or a conflicting systemd service.
+3. **Duplicate run** — An old gateway instance or wrapper that detects a second start and kills it.
+
+**What to do:**
+1. **Disable health monitor** — In `openclaw.json` under `gateway`, add: `"channelHealthCheckMinutes": 0`. Then fully restart (stop process, start again; hot-reload does not apply).
+2. **Check for other OpenClaw processes:** `pgrep -af "openclaw"` — ensure no duplicates.
+3. **Check systemd:** `systemctl status openclaw` — if a service exists, stop/disable it before running manually: `sudo systemctl stop openclaw`.
+4. **Run in foreground** — Use `./scripts/start-openclaw.sh` and keep the terminal open; avoid closing it right after start.
+
 ## Checking skill / sub-agent status (apollo, bouncer, etc.)
 
 When the bot says "skill is being processed in a sub-agent session" and will send results later, you can check progress yourself:

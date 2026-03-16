@@ -3,131 +3,130 @@
   "jobs": [
     {
       "id": "d66c8bed-6c9c-4100-93d6-590409600cea",
-      "name": "6AM - Build List",
+      "name": "6AM PT - Build List",
       "enabled": true,
       "createdAtMs": 1772788600592,
-      "updatedAtMs": 1773112025352,
+      "updatedAtMs": 1773656167796,
       "schedule": {
         "kind": "cron",
         "expr": "0 6 * * *",
-        "tz": "Asia/Ho_Chi_Minh"
+        "tz": "America/Los_Angeles"
       },
       "sessionTarget": "isolated",
       "wakeMode": "now",
       "payload": {
         "kind": "agentTurn",
-        "message": "Run workflow: build-list"
-      },
-      "delivery": {
-        "mode": "none",
-        "channel": "last"
-      },
-      "state": {
-        "nextRunAtMs": 1773183600000,
-        "lastRunAtMs": 1773111651304,
-        "lastRunStatus": "ok",
-        "lastStatus": "ok",
-        "lastDurationMs": 374048,
-        "lastDelivered": false,
-        "lastDeliveryStatus": "not-delivered",
-        "consecutiveErrors": 0
-      }
-    },
-    {
-      "id": "0d6eb890-7f8e-47a2-95d7-b50d268ff950",
-      "name": "6:30AM - Load Campaign",
-      "enabled": true,
-      "createdAtMs": 1772788601690,
-      "updatedAtMs": 1773112063854,
-      "schedule": {
-        "kind": "cron",
-        "expr": "30 6 * * *",
-        "tz": "Asia/Ho_Chi_Minh"
-      },
-      "sessionTarget": "isolated",
-      "wakeMode": "now",
-      "payload": {
-        "kind": "agentTurn",
-        "message": "Run workflow: load-campaign"
-      },
-      "delivery": {
-        "mode": "none",
-        "channel": "last"
-      },
-      "state": {
-        "nextRunAtMs": 1773185400000,
-        "lastRunAtMs": 1773112025352,
-        "lastRunStatus": "ok",
-        "lastStatus": "ok",
-        "lastDurationMs": 38502,
-        "lastDelivered": false,
-        "lastDeliveryStatus": "not-delivered",
-        "consecutiveErrors": 0
-      }
-    },
-    {
-      "id": "732a5f1a-9a0d-49ee-8609-bcd02de3e73a",
-      "name": "6PM - Process Replies",
-      "enabled": true,
-      "createdAtMs": 1772788602788,
-      "updatedAtMs": 1773112089669,
-      "schedule": {
-        "kind": "cron",
-        "expr": "0 18 * * *",
-        "tz": "Asia/Ho_Chi_Minh"
-      },
-      "sessionTarget": "isolated",
-      "wakeMode": "now",
-      "payload": {
-        "kind": "agentTurn",
-        "message": "Run workflow: process-replies"
-      },
-      "delivery": {
-        "mode": "none",
-        "channel": "last"
-      },
-      "state": {
-        "nextRunAtMs": 1773140400000,
-        "lastRunAtMs": 1773112063854,
-        "lastRunStatus": "ok",
-        "lastStatus": "ok",
-        "lastDurationMs": 25815,
-        "lastDelivered": false,
-        "lastDeliveryStatus": "not-delivered",
-        "consecutiveErrors": 0
-      }
-    },
-    {
-      "id": "82262b9e-6e42-447f-9e7a-c416015500fb",
-      "name": "10PM - Daily Report",
-      "enabled": true,
-      "createdAtMs": 1772788603877,
-      "updatedAtMs": 1773112122258,
-      "schedule": {
-        "kind": "cron",
-        "expr": "0 22 * * *",
-        "tz": "Asia/Ho_Chi_Minh"
-      },
-      "sessionTarget": "isolated",
-      "wakeMode": "now",
-      "payload": {
-        "kind": "agentTurn",
-        "message": "Run workflow: daily-report"
+        "message": "Run workflow: build-list\n\nTarget: 200 bouncer_verified leads today. Keep looping apollo → bouncer until the total bouncer_verified count reaches 200. Do not stop early. After completing, report step summary to Slack channel C0A5S86QH9D. If any error occurs, report it to Slack channel C0ALRRHK61X."
       },
       "delivery": {
         "mode": "announce",
         "channel": "slack",
-        "to": "channel:C0A720WG11N"
+        "to": "channel:C0A5S86QH9D"
       },
       "state": {
-        "nextRunAtMs": 1773154800000,
-        "lastRunAtMs": 1773112089669,
-        "lastRunStatus": "ok",
-        "lastStatus": "ok",
-        "lastDurationMs": 32589,
-        "lastDelivered": true,
-        "lastDeliveryStatus": "delivered",
-        "consecutiveErrors": 0
+        "nextRunAtMs": 1773666000000,
+        "lastRunAtMs": 1773656167769,
+        "lastRunStatus": "error",
+        "lastStatus": "error",
+        "lastDurationMs": 27,
+        "lastDeliveryStatus": "unknown",
+        "consecutiveErrors": 1,
+        "lastError": "FailoverError: No API key found for provider \"openai\". Auth store: /home/os/openclaw-mvp/state/agents/main/agent/auth-profiles.json (agentDir: /home/os/openclaw-mvp/state/agents/main/agent). Configure auth for this agent (openclaw agents add <id>) or copy auth-profiles.json from the main agentDir.",
+        "lastErrorReason": "auth"
+      }
+    },
+    {
+      "id": "0d6eb890-7f8e-47a2-95d7-b50d268ff950",
+      "name": "6:30AM PT - Load Campaign",
+      "enabled": true,
+      "createdAtMs": 1772788601690,
+      "updatedAtMs": 1773656167815,
+      "schedule": {
+        "kind": "cron",
+        "expr": "30 6 * * *",
+        "tz": "America/Los_Angeles"
+      },
+      "sessionTarget": "isolated",
+      "wakeMode": "now",
+      "payload": {
+        "kind": "agentTurn",
+        "message": "Run workflow: load-campaign\n\nAfter completing, report step summary to Slack channel C0A5S86QH9D. If any error occurs, report it to Slack channel C0ALRRHK61X."
+      },
+      "delivery": {
+        "mode": "announce",
+        "channel": "slack",
+        "to": "channel:C0A5S86QH9D"
+      },
+      "state": {
+        "nextRunAtMs": 1773667800000,
+        "lastRunAtMs": 1773656167796,
+        "lastRunStatus": "error",
+        "lastStatus": "error",
+        "lastDurationMs": 19,
+        "lastDeliveryStatus": "unknown",
+        "consecutiveErrors": 1,
+        "lastError": "FailoverError: No API key found for provider \"openai\". Auth store: /home/os/openclaw-mvp/state/agents/main/agent/auth-profiles.json (agentDir: /home/os/openclaw-mvp/state/agents/main/agent). Configure auth for this agent (openclaw agents add <id>) or copy auth-profiles.json from the main agentDir.",
+        "lastErrorReason": "auth"
+      }
+    },
+    {
+      "id": "f1a2b3c4-d5e6-7890-a1b2-c3d4e5f6a7b8",
+      "name": "10AM–9PM PT - Process Replies (Hourly)",
+      "enabled": true,
+      "createdAtMs": 1773200000000,
+      "updatedAtMs": 1773200000000,
+      "schedule": {
+        "kind": "cron",
+        "expr": "0 10-21 * * *",
+        "tz": "America/Los_Angeles"
+      },
+      "sessionTarget": "isolated",
+      "wakeMode": "now",
+      "payload": {
+        "kind": "agentTurn",
+        "message": "Run workflow: process-replies\n\nFetch replies from Instantly inbox for today. Classify hot/soft/objection/negative. Send automated reply to hot leads. After completing, report step summary (# replies fetched, # hot, # replied) to Slack channel C0A5S86QH9D. If any error occurs, report it to Slack channel C0ALRRHK61X."
+      },
+      "delivery": {
+        "mode": "announce",
+        "channel": "slack",
+        "to": "channel:C0A5S86QH9D"
+      },
+      "state": {
+        "nextRunAtMs": 1773680400000
+      }
+    },
+    {
+      "id": "82262b9e-6e42-447f-9e7a-c416015500fb",
+      "name": "10PM PT - Daily Report",
+      "enabled": true,
+      "createdAtMs": 1772788603877,
+      "updatedAtMs": 1773656167769,
+      "schedule": {
+        "kind": "cron",
+        "expr": "0 22 * * *",
+        "tz": "America/Los_Angeles"
+      },
+      "sessionTarget": "isolated",
+      "wakeMode": "now",
+      "payload": {
+        "kind": "agentTurn",
+        "message": "Run workflow: daily-report\n\nSend the daily report to Slack channel C0A5S86QH9D. If any error occurs, report it to Slack channel C0ALRRHK61X."
+      },
+      "delivery": {
+        "mode": "announce",
+        "channel": "slack",
+        "to": "channel:C0A5S86QH9D"
+      },
+      "state": {
+        "nextRunAtMs": 1773723600000,
+        "lastRunAtMs": 1773656167484,
+        "lastRunStatus": "error",
+        "lastStatus": "error",
+        "lastDurationMs": 285,
+        "lastDeliveryStatus": "unknown",
+        "consecutiveErrors": 1,
+        "lastError": "FailoverError: No API key found for provider \"openai\". Auth store: /home/os/openclaw-mvp/state/agents/main/agent/auth-profiles.json (agentDir: /home/os/openclaw-mvp/state/agents/main/agent). Configure auth for this agent (openclaw agents add <id>) or copy auth-profiles.json from the main agentDir.",
+        "lastErrorReason": "auth"
       }
     }
   ]

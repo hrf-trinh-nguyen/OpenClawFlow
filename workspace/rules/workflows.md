@@ -8,9 +8,14 @@
 
 **Purpose:** Collect leads from Apollo (search + match), then verify emails via Bouncer. All data is database-driven (`leads` table, `processing_status`).
 
-**Run in sequence:**
+**Daily target: 200 `bouncer_verified` leads.** Loop apollo → bouncer until the count reaches 200. Check progress after each Bouncer run:
+```bash
+psql "$SUPABASE_DB_URL" -c "SELECT COUNT(*) FROM leads WHERE processing_status='bouncer_verified' AND DATE(created_at) = CURRENT_DATE;"
+```
 
-1. **Apollo service** — collect N leads (default 100; set `TARGET_COUNT` from user message), write to DB with `processing_status='apollo_matched'`
+**Run in sequence (loop until 200 bouncer_verified):**
+
+1. **Apollo service** — collect 100 leads per batch, write to DB with `processing_status='apollo_matched'`
    ```bash
    cd ~/.openclaw && source .env && TARGET_COUNT=100 node workspace/skills/apollo/index.mjs
    ```
@@ -18,6 +23,9 @@
    ```bash
    node workspace/skills/bouncer/index.mjs
    ```
+3. **Check count** — if `bouncer_verified` < 200, repeat from step 1. Stop when ≥ 200.
+
+**After completing:** Report step summary to Slack channel `C0A5S86QH9D`. Report any errors to `C0ALRRHK61X`.
 
 **Command:** `Run workflow: build-list`
 
@@ -34,20 +42,24 @@
    cd ~/.openclaw && source .env && MODE=load node workspace/skills/instantly/index.mjs
    ```
 
+**After completing:** Report step summary to Slack channel `C0A5S86QH9D`. Report any errors to `C0ALRRHK61X`.
+
 **Command:** `Run workflow: load-campaign`
 
 ---
 
 ## process-replies
 
-**Purpose:** Fetch replies from Instantly and classify them with the LLM. **Default: today only** (0h-24h); never pulls all replies.
+**Purpose:** Fetch replies from Instantly and classify them with the LLM. **Default: today only** (0h-24h); never pulls all replies. Runs hourly 10AM–9PM Pacific Time.
 
 **Run:**
 
-1. **Instantly service (fetch + classify)** — fetch today's replies, classify hot/soft/objection/negative, save to DB
+1. **Instantly service (fetch + classify)** — fetch today's replies, classify hot/soft/objection/negative, send automated reply to hot leads, save to DB
    ```bash
    cd ~/.openclaw && source .env && MODE=fetch node workspace/skills/instantly/index.mjs
    ```
+
+**After completing:** Report step summary (# replies fetched, # hot/soft/objection/negative, # replies sent) to Slack channel `C0A5S86QH9D`. Report any errors to `C0ALRRHK61X`.
 
 **Fetch replies for a specific date:**
    ```bash
@@ -72,17 +84,19 @@
 
 ## daily-report
 
-**Purpose:** Aggregate metrics and send the daily report to Slack.
+**Purpose:** Aggregate metrics and send the daily report to Slack channel `C0A5S86QH9D`.
 
 **Skill order:**
 
 1. `report-build` — aggregate metrics from state → daily_report_text
-2. `slack-notify` — send daily_report_text to the Slack channel
+2. `slack-notify` — send daily_report_text to the Slack channel (`C0A5S86QH9D`)
 
 ```bash
 cd ~/.openclaw && OPENCLAW_STATE_DIR="$HOME/.openclaw/state" node workspace/skills/report-build/index.mjs
 cd ~/.openclaw && OPENCLAW_STATE_DIR="$HOME/.openclaw/state" node workspace/skills/slack-notify/index.mjs
 ```
+
+**Note:** `SLACK_REPORT_CHANNEL` env var must be set to `C0A5S86QH9D`. Report any errors to `C0ALRRHK61X`.
 
 **Command:** `Run workflow: daily-report`
 

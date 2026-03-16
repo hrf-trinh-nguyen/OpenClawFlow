@@ -1,7 +1,7 @@
 {
   "agents": {
     "defaults": {
-      "workspace": "/home/os/.openclaw/workspace",
+      "workspace": "~/.openclaw/workspace",
       "model": "openai/gpt-5.1",
       "compaction": {
         "mode": "safeguard"
@@ -33,7 +33,7 @@
     "ownerDisplay": "raw"
   },
   "cron": {
-    "enabled": false,
+    "enabled": true,
     "store": "~/.openclaw/cron/jobs.json",
     "maxConcurrentRuns": 1,
     "sessionRetention": "24h",
@@ -78,7 +78,7 @@
     "mode": "local",
     "auth": {
       "mode": "token",
-      "token": "3d4df0754b159f68a9be12edce993725e918b39d492df257"
+      "token": "${OPENCLAW_GATEWAY_TOKEN}"
     }
   },
   "skills": {

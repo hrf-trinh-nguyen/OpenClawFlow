@@ -11,7 +11,8 @@
  * ENV variables:
  * - INSTANTLY_API_KEY: Instantly API key
  * - INSTANTLY_CAMPAIGN_ID: Campaign ID
- * - OPENAI_API_KEY: OpenAI API key (for classification)
+ * - ANTHROPIC_API_KEY: Anthropic API key (for classification, preferred)
+ * - OPENAI_API_KEY: OpenAI API key (legacy fallback, optional)
  * - SUPABASE_DB_URL: PostgreSQL connection string
  * - MODE: 'load' | 'fetch' | 'classify' | 'all' (default: 'all')
  * - FETCH_DATE: Optional YYYY-MM-DD for single day (overrides default today)
@@ -26,6 +27,7 @@ import { getDb, createPipelineRun, updatePipelineRun, createServiceExecution, up
 
 const INSTANTLY_API_KEY = process.env.INSTANTLY_API_KEY;
 const INSTANTLY_CAMPAIGN_ID = process.env.INSTANTLY_CAMPAIGN_ID;
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const MODE = process.env.MODE || 'all';
 
@@ -258,13 +260,9 @@ async function instantlyReplyToEmail(params: {
   }
 }
 
-// ── LLM Classification ─────────────────────────────────────────────
+// ── LLM Classification (Anthropic preferred, OpenAI fallback) ─────
 
 async function classifyReply(replyText: string): Promise<{ category: string; confidence: number }> {
-  if (!OPENAI_API_KEY) {
-    throw new Error('OPENAI_API_KEY not found');
-  }
-
   const prompt = `Classify this outbound email reply into one of four categories:
 - hot (ready to talk)
 - soft (interested but timing issue)
@@ -274,6 +272,46 @@ async function classifyReply(replyText: string): Promise<{ category: string; con
 Reply: ${replyText}
 
 Return JSON only: { "category": "...", "confidence": 0-1 }`;
+
+  // Prefer Anthropic if configured
+  if (ANTHROPIC_API_KEY) {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: 'claude-3-5-sonnet-latest',
+        max_tokens: 128,
+        temperature: 0,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Anthropic API failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const content = (data.content && data.content[0]?.text) || '';
+
+    try {
+      const parsed = JSON.parse(content);
+      return {
+        category: parsed.category || 'objection',
+        confidence: parsed.confidence || 0.0
+      };
+    } catch {
+      return { category: 'objection', confidence: 0.0 };
+    }
+  }
+
+  // Legacy OpenAI fallback if Anthropic is not configured
+  if (!OPENAI_API_KEY) {
+    throw new Error('Neither ANTHROPIC_API_KEY nor OPENAI_API_KEY is configured');
+  }
 
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',

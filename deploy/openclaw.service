@@ -1,0 +1,20 @@
+[Unit]
+Description=OpenClaw Gateway (outbound automation)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=deploy
+WorkingDirectory=/home/deploy/openclaw-mvp
+# HOME must be explicit so openclaw resolves ~/.openclaw correctly
+Environment=HOME=/home/deploy
+Environment=PATH=/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-/home/deploy/openclaw-mvp/.env
+ExecStart=/home/deploy/openclaw-mvp/scripts/start-openclaw.sh
+Restart=always
+RestartSec=5
+# stdout/stderr go to journald: journalctl -u openclaw -f
+
+[Install]
+WantedBy=multi-user.target
