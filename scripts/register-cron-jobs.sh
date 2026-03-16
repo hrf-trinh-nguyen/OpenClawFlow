@@ -13,21 +13,17 @@ if [ -f .env ]; then
   set +a
 fi
 
-# 6AM, 6:30AM, 6PM: run workflow silently (no delivery; results in DB/state)
-openclaw cron add --name "6AM - Build List" --cron "0 6 * * *" --tz "Asia/Ho_Chi_Minh" \
+openclaw cron add --name "3AM-5AM PT - Build List (Batched)" --cron "0 3-5 * * *" --tz "America/Los_Angeles" \
   --session isolated --no-deliver --message "Run workflow: build-list"
 
-openclaw cron add --name "6:30AM - Load Campaign" --cron "30 6 * * *" --tz "Asia/Ho_Chi_Minh" \
+openclaw cron add --name "5:15AM & 5:45AM PT - Load Campaign (Batched)" --cron "15,45 5 * * *" --tz "America/Los_Angeles" \
   --session isolated --no-deliver --message "Run workflow: load-campaign"
 
-openclaw cron add --name "6PM - Process Replies" --cron "0 18 * * *" --tz "Asia/Ho_Chi_Minh" \
-  --session isolated --no-deliver --message "Run workflow: process-replies"
-
-openclaw cron add --name "8PM - Process Replies" --cron "0 20 * * *" --tz "Asia/Ho_Chi_Minh" \
+openclaw cron add --name "10AM–9PM PT - Process Replies (Hourly)" --cron "0 10-21 * * *" --tz "America/Los_Angeles" \
   --session isolated --no-deliver --message "Run workflow: process-replies"
 
 # 10PM: deliver report to Slack
-openclaw cron add --name "10PM - Daily Report" --cron "0 22 * * *" --tz "Asia/Ho_Chi_Minh" \
+openclaw cron add --name "10PM PT - Daily Report" --cron "0 22 * * *" --tz "America/Los_Angeles" \
   --session isolated --message "Run workflow: daily-report" \
   --announce --channel slack --to "channel:${SLACK_REPORT_CHANNEL:-}"
 

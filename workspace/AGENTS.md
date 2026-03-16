@@ -103,6 +103,7 @@ Respond when: mentioned, you add value, correcting misinformation. Stay silent w
 **CRITICAL:** Run workflows by executing the **bash commands** in `rules/workflows.md`. Do **NOT** invoke `apollo-search`, `apollo-match`, `bouncer-verify`, `instantly-load`, `instantly-fetch`, or `llm-classify` — those skills no longer exist. Use only: `apollo`, `bouncer`, `instantly`, `report-build`, `slack-notify`.
 
 **Workflow commands:** "Run workflow: build-list", "Run workflow: load-campaign", "Run workflow: process-replies", "Run workflow: daily-report", "Run workflow: full"
+**Short manual commands:** "Run one build-list batch", "Run build-list single batch", "Run one load-campaign batch", "Load up to 100 verified leads"
 
 **What to do:** (1) Read `rules/workflows.md` for the requested workflow. (2) Run the bash commands in sequence from `~/.openclaw` with `source .env`. (3) Complete all steps, then send one summary.
 
@@ -115,6 +116,7 @@ For full commands, read `rules/workflows.md` and `rules/flexible-pipeline-execut
 **Quick ref:** Parse natural language → params. Services pull by `processing_status`. Resume supported.
 
 - Apollo: `TARGET_COUNT=500` (parse from user). Bouncer: no params (pulls `apollo_matched`). Instantly: `MODE=load` or `MODE=fetch`. Report: `REPORT_DATE=YYYY-MM-DD`.
+- For short manual runs to avoid timeout: build-list single batch = `TARGET_COUNT=100` + one bouncer pass; load-campaign single batch = `LOAD_LIMIT=100 MODE=load`.
 - lead-stats: no params. lead-move: `FROM_STATUS`, `TO_STATUS`, optional `LIMIT`. lead-delete: `DELETE_STATUS`, optional `LIMIT`.
 - Verify N failed again: move N→apollo_matched, then run bouncer.
 

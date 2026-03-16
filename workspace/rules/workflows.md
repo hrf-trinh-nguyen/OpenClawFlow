@@ -8,14 +8,16 @@
 
 **Purpose:** Collect leads from Apollo (search + match), then verify emails via Bouncer. All data is database-driven (`leads` table, `processing_status`).
 
-**Daily target: 200 `bouncer_verified` leads.** Loop apollo → bouncer until the count reaches 200. Check progress after each Bouncer run:
+**Daily target: 200 `bouncer_verified` leads.** For cron, reach this target through **multiple short runs**, not one long looping run. Each run should do **one batch only** to avoid agent timeout.
+
+**Progress check:**
 ```bash
 psql "$SUPABASE_DB_URL" -c "SELECT COUNT(*) FROM leads WHERE processing_status='bouncer_verified' AND DATE(created_at) = CURRENT_DATE;"
 ```
 
-**Run in sequence (loop until 200 bouncer_verified):**
+**Run in sequence (single pass per run):**
 
-1. **Apollo service** — collect 100 leads per batch, write to DB with `processing_status='apollo_matched'`
+1. **Apollo service** — collect 100 leads for this batch, write to DB with `processing_status='apollo_matched'`
    ```bash
    cd ~/.openclaw && source .env && TARGET_COUNT=100 node workspace/skills/apollo/index.mjs
    ```
@@ -23,11 +25,22 @@ psql "$SUPABASE_DB_URL" -c "SELECT COUNT(*) FROM leads WHERE processing_status='
    ```bash
    node workspace/skills/bouncer/index.mjs
    ```
-3. **Check count** — if `bouncer_verified` < 200, repeat from step 1. Stop when ≥ 200.
+3. **Stop after this batch** — report current daily `bouncer_verified` count. The next cron run continues progress toward the 200/day target.
+
+**For cron:** Do not loop apollo → bouncer repeatedly inside one agent turn. Keep the run short and report progress.
 
 **After completing:** Report step summary to Slack channel `C0A5S86QH9D`. Report any errors to `C0ALRRHK61X`.
 
 **Command:** `Run workflow: build-list`
+
+**Manual short-run command for chat/Slack:** Use this when you want AI to run one safe batch only and avoid timeout:
+```bash
+cd ~/.openclaw && source .env && TARGET_COUNT=100 node workspace/skills/apollo/index.mjs && node workspace/skills/bouncer/index.mjs
+```
+Recommended phrasing to AI:
+- `Run one build-list batch`
+- `Run build-list single batch`
+- `Collect one batch only, do not loop to 200`
 
 ---
 
@@ -37,14 +50,25 @@ psql "$SUPABASE_DB_URL" -c "SELECT COUNT(*) FROM leads WHERE processing_status='
 
 **Run:**
 
-1. **Instantly service (load)** — pull `bouncer_verified` from DB, add to Instantly, set `instantly_loaded`
+1. **Instantly service (load)** — pull up to 100 `bouncer_verified` leads from DB, add to Instantly, set `instantly_loaded`
    ```bash
-   cd ~/.openclaw && source .env && MODE=load node workspace/skills/instantly/index.mjs
+   cd ~/.openclaw && source .env && LOAD_LIMIT=100 MODE=load node workspace/skills/instantly/index.mjs
    ```
+
+**For cron:** Keep each load run bounded to `LOAD_LIMIT=100` so large verified batches do not cause long agent turns.
 
 **After completing:** Report step summary to Slack channel `C0A5S86QH9D`. Report any errors to `C0ALRRHK61X`.
 
 **Command:** `Run workflow: load-campaign`
+
+**Manual short-run command for chat/Slack:** Use this when you want AI to load a bounded batch only:
+```bash
+cd ~/.openclaw && source .env && LOAD_LIMIT=100 MODE=load node workspace/skills/instantly/index.mjs
+```
+Recommended phrasing to AI:
+- `Run one load-campaign batch`
+- `Load up to 100 verified leads`
+- `Run load-campaign single batch`
 
 ---
 

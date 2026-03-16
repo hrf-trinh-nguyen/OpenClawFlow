@@ -11,18 +11,20 @@ After **every** workflow step completes, post a brief summary to `C0A5S86QH9D` (
 
 ---
 
-## 6:00 AM PT – Build List
+## 3:00 AM, 4:00 AM, 5:00 AM PT – Build List
 
 - **Workflow:** `build-list`
 - Skills: apollo → bouncer
-- **Target: 200 `bouncer_verified` leads.** Keep looping apollo → bouncer until `bouncer_verified` count reaches 200. Do not stop early.
+- Runs at `0 3-5 * * *` via OpenClaw cron
+- **Daily target: 200 `bouncer_verified` leads.** Each run does a single Apollo batch (`TARGET_COUNT=100`) + one Bouncer pass. Later runs continue progress toward the daily target.
 - Report completion summary to `C0A5S86QH9D`. Report errors to `C0ALRRHK61X`.
 
-## 6:30 AM PT – Load Campaign
+## 5:15 AM, 5:45 AM PT – Load Campaign
 
 - **Workflow:** `load-campaign`
 - Skill: instantly (MODE=load)
-- Add verified leads from DB to Instantly campaign (send schedule set in Instantly UI)
+- Runs at `15,45 5 * * *`
+- Add verified leads from DB to Instantly campaign in bounded batches (`LOAD_LIMIT=100`) so each run stays short and finishes before Instantly starts sending at `6:30 AM PT`
 - Report completion summary to `C0A5S86QH9D`. Report errors to `C0ALRRHK61X`.
 
 ## 9:00 AM – 5:00 PM PT – Sending Window

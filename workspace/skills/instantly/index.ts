@@ -15,6 +15,7 @@
  * - OPENAI_API_KEY: OpenAI API key (legacy fallback, optional)
  * - SUPABASE_DB_URL: PostgreSQL connection string
  * - MODE: 'load' | 'fetch' | 'classify' | 'all' (default: 'all')
+ * - LOAD_LIMIT: Max verified leads to load in a single run (default: 100)
  * - FETCH_DATE: Optional YYYY-MM-DD for single day (overrides default today)
  * - FETCH_DATE_FROM + FETCH_DATE_TO: Date range (YYYY-MM-DD) when user provides start/end
  * - When no date params: defaults to TODAY only (0h-24h local) to avoid pulling all replies
@@ -30,6 +31,7 @@ const INSTANTLY_CAMPAIGN_ID = process.env.INSTANTLY_CAMPAIGN_ID;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const MODE = process.env.MODE || 'all';
+const LOAD_LIMIT = parseInt(process.env.LOAD_LIMIT || '100', 10);
 
 if (!INSTANTLY_API_KEY) {
   console.error('❌ INSTANTLY_API_KEY not found in env');
@@ -349,14 +351,14 @@ Return JSON only: { "category": "...", "confidence": 0-1 }`;
 async function runLoadService(db: any, runId: string) {
   console.log(`\n📤 Load Service: Pushing verified leads to Instantly...\n`);
 
-  const verifiedLeads = await getLeadsReadyForCampaign(db, 10000);
+  const verifiedLeads = await getLeadsReadyForCampaign(db, LOAD_LIMIT);
 
   if (verifiedLeads.length === 0) {
     console.log('ℹ️  No verified leads to load (bouncer_verified, not blacklisted, 45-day ok)\n');
     return { processed: 0, succeeded: 0, failed: 0 };
   }
 
-  console.log(`📊 Found ${verifiedLeads.length} verified leads ready for campaign\n`);
+  console.log(`📊 Found ${verifiedLeads.length} verified leads ready for campaign (limit ${LOAD_LIMIT})\n`);
 
   const execId = await createServiceExecution(db, {
     pipeline_run_id: runId,

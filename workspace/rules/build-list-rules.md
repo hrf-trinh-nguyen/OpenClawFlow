@@ -19,18 +19,18 @@ Rules for the build-list skill pipeline.
 
 ## Daily Target — MUST reach 200 bouncer_verified
 
-**Each day the build-list workflow MUST collect 200 leads with `bouncer_verified` status.**
+**Each day the pipeline MUST collect 200 leads with `bouncer_verified` status.**
 
-- Run apollo → bouncer in a loop until the total `bouncer_verified` count for the day reaches **200**
-- Do NOT stop after a single pass if fewer than 200 leads are verified
-- Each loop: pull the next batch from Apollo (100/batch), run Bouncer verify, check DB count
-- Query to check progress: `SELECT COUNT(*) FROM leads WHERE processing_status='bouncer_verified' AND DATE(created_at) = CURRENT_DATE;`
-- Only stop when `bouncer_verified` count ≥ 200
+- Cron should reach the 200/day target through **multiple short runs**, not one long loop-heavy agent turn
+- Each `build-list` cron run should do exactly **one** Apollo batch (`TARGET_COUNT=100`) followed by one Bouncer pass
+- After each run, check progress with: `SELECT COUNT(*) FROM leads WHERE processing_status='bouncer_verified' AND DATE(created_at) = CURRENT_DATE;`
+- If the daily count is still under 200, let the **next scheduled build-list run** continue progress
 - If Apollo returns no more results: log warning, report to `C0ALRRHK61X`, stop gracefully
 
 ## Limits & Guardrails
 
-- Batch size: 100 leads per Apollo pull (loop until daily target met)
+- Batch size: 100 leads per Apollo pull
+- Keep each cron run bounded to a single Apollo + Bouncer pass to avoid agent timeout
 - Max 500 new contacts per campaign per day
 - Never contact someone emailed in last 45 days
 - If invalid rate > 30%: log warning, review ICP filters

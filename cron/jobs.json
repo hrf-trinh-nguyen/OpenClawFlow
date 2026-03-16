@@ -3,20 +3,20 @@
   "jobs": [
     {
       "id": "d66c8bed-6c9c-4100-93d6-590409600cea",
-      "name": "6AM PT - Build List",
+      "name": "3AM-5AM PT - Build List (Batched)",
       "enabled": true,
       "createdAtMs": 1772788600592,
       "updatedAtMs": 1773656167796,
       "schedule": {
         "kind": "cron",
-        "expr": "0 6 * * *",
+        "expr": "0 3-5 * * *",
         "tz": "America/Los_Angeles"
       },
       "sessionTarget": "isolated",
       "wakeMode": "now",
       "payload": {
         "kind": "agentTurn",
-        "message": "Run workflow: build-list\n\nTarget: 200 bouncer_verified leads today. Keep looping apollo → bouncer until the total bouncer_verified count reaches 200. Do not stop early. After completing, report step summary to Slack channel C0A5S86QH9D. If any error occurs, report it to Slack channel C0ALRRHK61X."
+        "message": "Run workflow: build-list\n\nCron mode: run exactly one short batch only. Use TARGET_COUNT=100 for Apollo, then run one Bouncer pass, then stop. Do not loop inside this agent turn. Report the current daily bouncer_verified count to Slack channel C0A5S86QH9D. If any error occurs, report it to Slack channel C0ALRRHK61X."
       },
       "delivery": {
         "mode": "announce",
@@ -37,20 +37,20 @@
     },
     {
       "id": "0d6eb890-7f8e-47a2-95d7-b50d268ff950",
-      "name": "6:30AM PT - Load Campaign",
+      "name": "5:15AM & 5:45AM PT - Load Campaign (Batched)",
       "enabled": true,
       "createdAtMs": 1772788601690,
       "updatedAtMs": 1773656167815,
       "schedule": {
         "kind": "cron",
-        "expr": "30 6 * * *",
+        "expr": "15,45 5 * * *",
         "tz": "America/Los_Angeles"
       },
       "sessionTarget": "isolated",
       "wakeMode": "now",
       "payload": {
         "kind": "agentTurn",
-        "message": "Run workflow: load-campaign\n\nAfter completing, report step summary to Slack channel C0A5S86QH9D. If any error occurs, report it to Slack channel C0ALRRHK61X."
+        "message": "Run workflow: load-campaign\n\nCron mode: keep this run short. Load at most 100 verified leads this turn (LOAD_LIMIT=100), then stop and report summary to Slack channel C0A5S86QH9D. If any error occurs, report it to Slack channel C0ALRRHK61X."
       },
       "delivery": {
         "mode": "announce",
