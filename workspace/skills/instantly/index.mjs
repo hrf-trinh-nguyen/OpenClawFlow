@@ -132,6 +132,16 @@ async function updateServiceExecution(client, execId, updates) {
 }
 
 // lib/db/leads.ts
+async function getInstantlyLoadedCountToday(client) {
+  var _a;
+  const result = await client.query(
+    `SELECT COUNT(*)::int AS c FROM leads
+     WHERE processing_status = 'instantly_loaded'
+       AND (updated_at AT TIME ZONE 'America/Los_Angeles')::date =
+           (NOW() AT TIME ZONE 'America/Los_Angeles')::date`
+  );
+  return Number(((_a = result.rows[0]) == null ? void 0 : _a.c) ?? 0);
+}
 async function getLeadsReadyForCampaign(client, limit = 1e4) {
   const result = await client.query(
     `SELECT id, apollo_person_id, first_name, last_name, email, company_name,
@@ -229,6 +239,8 @@ var RATE_LIMITS = {
 var DEFAULTS = {
   TARGET_COUNT: 5,
   LOAD_LIMIT: 100,
+  /** Max leads to push to Instantly per calendar day (PT). Env: INSTANTLY_LOAD_DAILY_CAP */
+  INSTANTLY_LOAD_DAILY_CAP: 250,
   BOUNCER_BATCH_SIZE: 1e3,
   FETCH_LIMIT: 100
 };
@@ -368,6 +380,10 @@ var INSTANTLY_CAMPAIGN_ID = process.env.INSTANTLY_CAMPAIGN_ID;
 var OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 var MODE = process.env.MODE || "all";
 var LOAD_LIMIT = parseIntSafe(process.env.LOAD_LIMIT, DEFAULTS.LOAD_LIMIT);
+var LOAD_DAILY_CAP = parseIntSafe(
+  process.env.INSTANTLY_LOAD_DAILY_CAP,
+  DEFAULTS.INSTANTLY_LOAD_DAILY_CAP
+);
 function validateEnv() {
   validateRequiredEnv(["INSTANTLY_API_KEY", "INSTANTLY_CAMPAIGN_ID", "SUPABASE_DB_URL"]);
   if ((MODE === "fetch" || MODE === "all") && !OPENAI_API_KEY) {
@@ -579,13 +595,25 @@ async function runLoadService(db, runId) {
   console.log(`
 \u{1F4E4} Load Service: Pushing verified leads to Instantly...
 `);
-  const verifiedLeads = await getLeadsReadyForCampaign(db, LOAD_LIMIT);
+  const loadedToday = await getInstantlyLoadedCountToday(db);
+  const remainingDaily = Math.max(0, LOAD_DAILY_CAP - loadedToday);
+  const limit = Math.min(LOAD_LIMIT, remainingDaily);
+  if (limit === 0) {
+    console.log(
+      `\u2139\uFE0F  Daily cap reached: ${loadedToday}/${LOAD_DAILY_CAP} loaded today. Skipping load.
+`
+    );
+    return { processed: 0, succeeded: 0, failed: 0 };
+  }
+  const verifiedLeads = await getLeadsReadyForCampaign(db, limit);
   if (verifiedLeads.length === 0) {
     console.log("\u2139\uFE0F  No verified leads to load\n");
     return { processed: 0, succeeded: 0, failed: 0 };
   }
-  console.log(`\u{1F4CA} Found ${verifiedLeads.length} verified leads (limit ${LOAD_LIMIT})
-`);
+  console.log(
+    `\u{1F4CA} Found ${verifiedLeads.length} verified leads (limit ${limit}, daily cap ${LOAD_DAILY_CAP}, already loaded today: ${loadedToday})
+`
+  );
   const execId = await createServiceExecution(db, {
     pipeline_run_id: runId,
     service_name: "instantly",

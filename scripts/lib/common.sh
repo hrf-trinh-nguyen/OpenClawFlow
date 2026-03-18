@@ -81,6 +81,87 @@ try {
 EOF
 }
 
+# Số lead mới từ Apollo đã insert trong ngày (created_at hôm nay, PT)
+get_apollo_inserted_count_today() {
+  node --input-type=module <<'EOF'
+import pg from 'pg';
+const conn = (process.env.SUPABASE_DB_URL || '').trim().replace(/^['"]|['"]$/g, '');
+if (!conn) { console.log('0'); process.exit(0); }
+const pool = new pg.Pool({ connectionString: conn });
+try {
+  const r = await pool.query(`
+    SELECT COUNT(*)::int AS c FROM leads
+    WHERE apollo_person_id IS NOT NULL
+      AND DATE(created_at AT TIME ZONE 'America/Los_Angeles') = (NOW() AT TIME ZONE 'America/Los_Angeles')::date
+  `);
+  console.log(r.rows[0]?.c ?? 0);
+} catch { console.log('0'); } finally { await pool.end(); }
+EOF
+}
+
+# Count leads inserted by a specific Apollo batch_id
+get_apollo_inserted_count_for_batch() {
+  local batch_id="$1"
+  node --input-type=module <<'EOF'
+import pg from 'pg';
+const batchId = process.env.BATCH_ID || '';
+const conn = (process.env.SUPABASE_DB_URL || '').trim().replace(/^['"]|['"]$/g, '');
+if (!conn || !batchId) { console.log('0'); process.exit(0); }
+const pool = new pg.Pool({ connectionString: conn });
+try {
+  const r = await pool.query(
+    `SELECT COUNT(*)::int AS c FROM leads WHERE batch_id = $1`,
+    [batchId]
+  );
+  console.log(r.rows[0]?.c ?? 0);
+} catch { console.log('0'); } finally { await pool.end(); }
+EOF
+}
+
+# Count bouncer_verified leads for a specific Apollo batch_id
+get_bouncer_verified_count_for_batch() {
+  local batch_id="$1"
+  node --input-type=module <<'EOF'
+import pg from 'pg';
+const batchId = process.env.BATCH_ID || '';
+const conn = (process.env.SUPABASE_DB_URL || '').trim().replace(/^['"]|['"]$/g, '');
+if (!conn || !batchId) { console.log('0'); process.exit(0); }
+const pool = new pg.Pool({ connectionString: conn });
+try {
+  const r = await pool.query(
+    `SELECT COUNT(*)::int AS c FROM leads
+     WHERE batch_id = $1 AND processing_status = 'bouncer_verified'`,
+    [batchId]
+  );
+  console.log(r.rows[0]?.c ?? 0);
+} catch { console.log('0'); } finally { await pool.end(); }
+EOF
+}
+
+# Apollo runs/day guard (based on local state file, PT)
+get_pt_date() {
+  TZ=America/Los_Angeles date +%F
+}
+
+apollo_run_guard() {
+  local max_runs="${1:-3}"
+  local state_dir="${REPO_ROOT}/state"
+  mkdir -p "$state_dir"
+  local day
+  day="$(get_pt_date)"
+  local f="${state_dir}/apollo-runs-${day}.txt"
+  local runs=0
+  if [ -f "$f" ]; then
+    runs="$(wc -l < "$f" | tr -d ' ')"
+  fi
+  if [ "$runs" -ge "$max_runs" ]; then
+    echo "SKIP"
+    return 0
+  fi
+  echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') $(hostname) $$" >> "$f"
+  echo "OK"
+}
+
 # ── Timing Utilities ─────────────────────────────────────────────────
 
 start_timer() {

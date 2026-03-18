@@ -252,6 +252,8 @@ var RATE_LIMITS = {
 var DEFAULTS = {
   TARGET_COUNT: 5,
   LOAD_LIMIT: 100,
+  /** Max leads to push to Instantly per calendar day (PT). Env: INSTANTLY_LOAD_DAILY_CAP */
+  INSTANTLY_LOAD_DAILY_CAP: 250,
   BOUNCER_BATCH_SIZE: 1e3,
   FETCH_LIMIT: 100
 };
@@ -311,8 +313,15 @@ validateRequiredEnv(["APOLLO_API_KEY", "SUPABASE_DB_URL"]);
 var APOLLO_API_KEY = process.env.APOLLO_API_KEY;
 var TARGET_COUNT = parseIntSafe(process.env.TARGET_COUNT, DEFAULTS.TARGET_COUNT);
 var BATCH_ID = process.env.BATCH_ID || `apollo-${Date.now()}`;
-var PERSON_TITLES = process.env.PERSON_TITLES ? parseJsonSafe(process.env.PERSON_TITLES, APOLLO_ICP_DEFAULTS.PERSON_TITLES) : APOLLO_ICP_DEFAULTS.PERSON_TITLES;
-var ORGANIZATION_INDUSTRY_TAG_IDS = process.env.ORGANIZATION_INDUSTRY_TAG_IDS ? parseJsonSafe(process.env.ORGANIZATION_INDUSTRY_TAG_IDS, APOLLO_ICP_DEFAULTS.ORGANIZATION_INDUSTRY_TAG_IDS) : APOLLO_ICP_DEFAULTS.ORGANIZATION_INDUSTRY_TAG_IDS;
+var MAX_API_ERRORS = parseIntSafe(process.env.APOLLO_MAX_API_ERRORS, 30);
+var PERSON_TITLES = process.env.PERSON_TITLES ? parseJsonSafe(
+  process.env.PERSON_TITLES,
+  [...APOLLO_ICP_DEFAULTS.PERSON_TITLES]
+) : [...APOLLO_ICP_DEFAULTS.PERSON_TITLES];
+var ORGANIZATION_INDUSTRY_TAG_IDS = process.env.ORGANIZATION_INDUSTRY_TAG_IDS ? parseJsonSafe(
+  process.env.ORGANIZATION_INDUSTRY_TAG_IDS,
+  [...APOLLO_ICP_DEFAULTS.ORGANIZATION_INDUSTRY_TAG_IDS]
+) : [...APOLLO_ICP_DEFAULTS.ORGANIZATION_INDUSTRY_TAG_IDS];
 async function apolloSearchPeople(page = 1, perPage = 100) {
   var _a, _b;
   const body = {
@@ -367,7 +376,13 @@ async function apolloBulkMatch(personIds) {
     body: JSON.stringify(body)
   });
   if (!response.ok) {
-    throw new Error(`Apollo bulk match failed: ${response.status} ${response.statusText}`);
+    const errBody = await response.text();
+    let errMsg = `Apollo bulk match failed: ${response.status} ${response.statusText}`;
+    if (errBody) {
+      const parsed = parseJsonSafe(errBody, null);
+      errMsg += parsed ? ` \u2014 ${JSON.stringify(parsed)}` : ` \u2014 ${errBody.slice(0, 300)}`;
+    }
+    throw new Error(errMsg);
   }
   const data = await response.json();
   return (data.matches || []).map((match) => {
@@ -379,7 +394,7 @@ async function apolloBulkMatch(personIds) {
       email: match.email,
       company_name: ((_a = match.organization) == null ? void 0 : _a.name) ?? "",
       title: match.title ?? "",
-      linkedin_url: match.linkedin_url,
+      linkedin_url: match.linkedin_url ?? void 0,
       processing_status: "apollo_matched",
       batch_id: BATCH_ID
     };
@@ -471,6 +486,13 @@ async function main() {
       let pageLeads = [];
       for (let i = 0; i < searchResult.person_ids.length; i += matchBatchSize) {
         if (pageLeads.length >= neededForTarget) break;
+        if (apiErrors >= MAX_API_ERRORS) {
+          console.log(
+            `   \u{1F6D1} Too many Apollo API errors (${apiErrors} >= ${MAX_API_ERRORS}). Stopping early to avoid burning credits.
+`
+          );
+          break;
+        }
         const batch = searchResult.person_ids.slice(i, i + matchBatchSize);
         console.log(`   \u{1F517} Matching batch ${Math.floor(i / matchBatchSize) + 1} (${batch.length} IDs)...`);
         const execMatchId = await createServiceExecution(db, {
@@ -507,6 +529,7 @@ async function main() {
             i -= matchBatchSize;
             continue;
           }
+          continue;
         }
         await sleep(RATE_LIMITS.APOLLO_DELAY_BETWEEN_BATCHES_MS);
       }

@@ -14,10 +14,17 @@ LOAD_LIMIT="${LOAD_LIMIT:-100}"
 log_info "Starting load-campaign batch (LOAD_LIMIT=${LOAD_LIMIT})"
 start_timer
 
+LOADED_BEFORE=$(get_loaded_count_today)
 if LOAD_LIMIT="$LOAD_LIMIT" MODE=load node workspace/skills/instantly/index.mjs; then
   DURATION=$(get_duration)
   LOADED_TODAY=$(get_loaded_count_today)
-  MSG="✅ Load-campaign batch done in ${DURATION}s (limit ${LOAD_LIMIT}). Daily instantly_loaded count: ${LOADED_TODAY}"
+  LOADED_THIS_RUN=$((LOADED_TODAY - LOADED_BEFORE))
+  CAP="${INSTANTLY_LOAD_DAILY_CAP:-200}"
+  if [ "$LOADED_THIS_RUN" -le 0 ] && [ "$LOADED_TODAY" -ge "$CAP" ]; then
+    MSG="✅ Load-campaign batch done in ${DURATION}s (limit ${LOAD_LIMIT}). Skipped (daily cap reached: ${LOADED_TODAY}/${CAP})."
+  else
+    MSG="✅ Load-campaign batch done in ${DURATION}s (limit ${LOAD_LIMIT}). This run: loaded ${LOADED_THIS_RUN}. Today: instantly_loaded ${LOADED_TODAY}/${CAP}."
+  fi
   log_success "$MSG"
   post_slack_report "$MSG"
 else

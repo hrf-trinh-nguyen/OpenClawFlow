@@ -209,6 +209,16 @@ async function getLeadsByStatus(client, status, limit = 100) {
   );
   return result.rows;
 }
+async function getInstantlyLoadedCountToday(client) {
+  var _a;
+  const result = await client.query(
+    `SELECT COUNT(*)::int AS c FROM leads
+     WHERE processing_status = 'instantly_loaded'
+       AND (updated_at AT TIME ZONE 'America/Los_Angeles')::date =
+           (NOW() AT TIME ZONE 'America/Los_Angeles')::date`
+  );
+  return Number(((_a = result.rows[0]) == null ? void 0 : _a.c) ?? 0);
+}
 async function getLeadsReadyForCampaign(client, limit = 1e4) {
   const result = await client.query(
     `SELECT id, apollo_person_id, first_name, last_name, email, company_name,
@@ -352,6 +362,9 @@ async function getMetricsForReport(client, reportDate) {
       else if (row.category === "soft") metrics.soft_count = c;
       else if (row.category === "objection") metrics.objection_count = c;
       else if (row.category === "negative") metrics.negative_count = c;
+      else if (row.category === "out_of_office") metrics.out_of_office_count = c;
+      else if (row.category === "auto_reply") metrics.auto_reply_count = c;
+      else if (row.category === "not_a_reply") metrics.not_a_reply_count = c;
     }
   }
   const totalChecked = metrics.leads_validated + metrics.leads_removed;
@@ -491,6 +504,7 @@ export {
   getDailyReportsByMonth,
   getDb,
   getExistingEmails,
+  getInstantlyLoadedCountToday,
   getLeadsByStatus,
   getLeadsReadyForCampaign,
   getMetricsForReport,

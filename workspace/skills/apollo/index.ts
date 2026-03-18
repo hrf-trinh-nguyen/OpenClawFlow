@@ -36,14 +36,21 @@ validateRequiredEnv(['APOLLO_API_KEY', 'SUPABASE_DB_URL']);
 const APOLLO_API_KEY = process.env.APOLLO_API_KEY!;
 const TARGET_COUNT = parseIntSafe(process.env.TARGET_COUNT, DEFAULTS.TARGET_COUNT);
 const BATCH_ID = process.env.BATCH_ID || `apollo-${Date.now()}`;
+const MAX_API_ERRORS = parseIntSafe(process.env.APOLLO_MAX_API_ERRORS, 30);
 
 const PERSON_TITLES = process.env.PERSON_TITLES
-  ? parseJsonSafe<string[]>(process.env.PERSON_TITLES, APOLLO_ICP_DEFAULTS.PERSON_TITLES)
-  : APOLLO_ICP_DEFAULTS.PERSON_TITLES;
+  ? parseJsonSafe<string[]>(
+      process.env.PERSON_TITLES,
+      [...APOLLO_ICP_DEFAULTS.PERSON_TITLES]
+    )
+  : [...APOLLO_ICP_DEFAULTS.PERSON_TITLES];
 
 const ORGANIZATION_INDUSTRY_TAG_IDS = process.env.ORGANIZATION_INDUSTRY_TAG_IDS
-  ? parseJsonSafe<string[]>(process.env.ORGANIZATION_INDUSTRY_TAG_IDS, APOLLO_ICP_DEFAULTS.ORGANIZATION_INDUSTRY_TAG_IDS)
-  : APOLLO_ICP_DEFAULTS.ORGANIZATION_INDUSTRY_TAG_IDS;
+  ? parseJsonSafe<string[]>(
+      process.env.ORGANIZATION_INDUSTRY_TAG_IDS,
+      [...APOLLO_ICP_DEFAULTS.ORGANIZATION_INDUSTRY_TAG_IDS]
+    )
+  : [...APOLLO_ICP_DEFAULTS.ORGANIZATION_INDUSTRY_TAG_IDS];
 
 // ── Apollo API ─────────────────────────────────────────────────────
 
@@ -104,7 +111,7 @@ interface ApolloLead {
   email: string;
   company_name: string;
   title: string;
-  linkedin_url: string | null;
+  linkedin_url?: string;
   processing_status: string;
   batch_id: string;
 }
@@ -127,7 +134,13 @@ async function apolloBulkMatch(personIds: string[]): Promise<ApolloLead[]> {
   });
 
   if (!response.ok) {
-    throw new Error(`Apollo bulk match failed: ${response.status} ${response.statusText}`);
+    const errBody = await response.text();
+    let errMsg = `Apollo bulk match failed: ${response.status} ${response.statusText}`;
+    if (errBody) {
+      const parsed = parseJsonSafe(errBody, null);
+      errMsg += parsed ? ` — ${JSON.stringify(parsed)}` : ` — ${errBody.slice(0, 300)}`;
+    }
+    throw new Error(errMsg);
   }
 
   const data = await response.json();
@@ -139,7 +152,7 @@ async function apolloBulkMatch(personIds: string[]): Promise<ApolloLead[]> {
     email: match.email,
     company_name: match.organization?.name ?? '',
     title: match.title ?? '',
-    linkedin_url: match.linkedin_url,
+    linkedin_url: match.linkedin_url ?? undefined,
     processing_status: 'apollo_matched',
     batch_id: BATCH_ID,
   }));
@@ -244,6 +257,12 @@ async function main() {
 
       for (let i = 0; i < searchResult.person_ids.length; i += matchBatchSize) {
         if (pageLeads.length >= neededForTarget) break;
+        if (apiErrors >= MAX_API_ERRORS) {
+          console.log(
+            `   🛑 Too many Apollo API errors (${apiErrors} >= ${MAX_API_ERRORS}). Stopping early to avoid burning credits.\n`
+          );
+          break;
+        }
 
         const batch = searchResult.person_ids.slice(i, i + matchBatchSize);
 
@@ -289,6 +308,9 @@ async function main() {
             i -= matchBatchSize;
             continue;
           }
+          // Non-retryable errors (e.g. 422): skip this batch, keep whatever we already matched.
+          // We'll also stop early once MAX_API_ERRORS is reached (guard above).
+          continue;
         }
 
         await sleep(RATE_LIMITS.APOLLO_DELAY_BETWEEN_BATCHES_MS);

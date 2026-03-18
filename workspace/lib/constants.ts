@@ -63,7 +63,7 @@ export const DEFAULTS = {
   TARGET_COUNT: 5,
   LOAD_LIMIT: 100,
   /** Max leads to push to Instantly per calendar day (PT). Env: INSTANTLY_LOAD_DAILY_CAP */
-  INSTANTLY_LOAD_DAILY_CAP: 200,
+  INSTANTLY_LOAD_DAILY_CAP: 250,
   BOUNCER_BATCH_SIZE: 1000,
   FETCH_LIMIT: 100,
 } as const;
