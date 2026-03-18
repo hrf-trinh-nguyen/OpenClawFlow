@@ -134,6 +134,17 @@ export async function getLeadsByStatus(
   return result.rows;
 }
 
+/** Count of leads marked instantly_loaded today (America/Los_Angeles). */
+export async function getInstantlyLoadedCountToday(client: DbClient): Promise<number> {
+  const result = await client.query(
+    `SELECT COUNT(*)::int AS c FROM leads
+     WHERE processing_status = 'instantly_loaded'
+       AND (updated_at AT TIME ZONE 'America/Los_Angeles')::date =
+           (NOW() AT TIME ZONE 'America/Los_Angeles')::date`
+  );
+  return Number(result.rows[0]?.c ?? 0);
+}
+
 export async function getLeadsReadyForCampaign(
   client: DbClient,
   limit: number = 10000

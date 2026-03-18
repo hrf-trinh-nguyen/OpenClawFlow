@@ -41,3 +41,17 @@ systemctl list-timers | grep openclaw
 ./scripts/run-build-list.sh
 ./scripts/run-load-campaign.sh
 ```
+
+---
+
+## Đã tự chạy chưa? (kiểm tra trên VPS)
+
+Cần **cả hai** phần sau thì mới tự chạy đủ:
+
+| Phần | Cách bật | Kiểm tra |
+|------|----------|----------|
+| **Build List + Load Campaign** | **Cách 1:** `./scripts/deploy-timers.sh` (systemd) | `systemctl list-timers \| grep openclaw` |
+| | **Cách 2:** `./scripts/install-cron.sh` (crontab) | `crontab -l` |
+| **Process Replies + Daily Report** | `./scripts/register-cron-jobs.sh` (OpenClaw cron) | `openclaw cron list` |
+
+**Lưu ý:** Nếu repo trên VPS là `~/OpenClawFlow` (không phải `openclaw-mvp`), dùng **crontab** (Cách 2) vì `install-cron.sh` tự thay đường dẫn repo; systemd service đang ghi cứng `/home/deploy/openclaw-mvp` nên cần sửa file trong `deploy/` hoặc tạo symlink nếu dùng timer.

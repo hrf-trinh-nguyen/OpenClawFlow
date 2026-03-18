@@ -15,6 +15,7 @@
  * - SUPABASE_DB_URL: PostgreSQL connection string (required)
  * - MODE: 'load' | 'fetch' | 'all' (default: 'all')
  * - LOAD_LIMIT: Max verified leads to load per run (default: 100)
+ * - INSTANTLY_LOAD_DAILY_CAP: Max leads to push to Instantly per calendar day PT (default: 200)
  * - FETCH_DATE: Single day YYYY-MM-DD (optional, defaults to today)
  * - FETCH_DATE_FROM + FETCH_DATE_TO: Date range (optional)
  */
@@ -26,6 +27,7 @@ import {
   createServiceExecution,
   updateServiceExecution,
   getLeadsReadyForCampaign,
+  getInstantlyLoadedCountToday,
   batchUpdateLeadStatus,
 } from '../../lib/supabase-pipeline.js';
 import {
@@ -58,6 +60,10 @@ const INSTANTLY_CAMPAIGN_ID = process.env.INSTANTLY_CAMPAIGN_ID;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const MODE = process.env.MODE || 'all';
 const LOAD_LIMIT = parseIntSafe(process.env.LOAD_LIMIT, DEFAULTS.LOAD_LIMIT);
+const LOAD_DAILY_CAP = parseIntSafe(
+  process.env.INSTANTLY_LOAD_DAILY_CAP,
+  DEFAULTS.INSTANTLY_LOAD_DAILY_CAP
+);
 
 // ── Validation ─────────────────────────────────────────────────────
 
@@ -351,14 +357,27 @@ interface LoadResult {
 async function runLoadService(db: any, runId: string): Promise<LoadResult> {
   console.log(`\n📤 Load Service: Pushing verified leads to Instantly...\n`);
 
-  const verifiedLeads = await getLeadsReadyForCampaign(db, LOAD_LIMIT);
+  const loadedToday = await getInstantlyLoadedCountToday(db);
+  const remainingDaily = Math.max(0, LOAD_DAILY_CAP - loadedToday);
+  const limit = Math.min(LOAD_LIMIT, remainingDaily);
+
+  if (limit === 0) {
+    console.log(
+      `ℹ️  Daily cap reached: ${loadedToday}/${LOAD_DAILY_CAP} loaded today. Skipping load.\n`
+    );
+    return { processed: 0, succeeded: 0, failed: 0 };
+  }
+
+  const verifiedLeads = await getLeadsReadyForCampaign(db, limit);
 
   if (verifiedLeads.length === 0) {
     console.log('ℹ️  No verified leads to load\n');
     return { processed: 0, succeeded: 0, failed: 0 };
   }
 
-  console.log(`📊 Found ${verifiedLeads.length} verified leads (limit ${LOAD_LIMIT})\n`);
+  console.log(
+    `📊 Found ${verifiedLeads.length} verified leads (limit ${limit}, daily cap ${LOAD_DAILY_CAP}, already loaded today: ${loadedToday})\n`
+  );
 
   const execId = await createServiceExecution(db, {
     pipeline_run_id: runId,

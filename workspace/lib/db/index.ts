@@ -24,6 +24,7 @@ export {
   upsertLeads,
   getLeadsByStatus,
   getLeadsReadyForCampaign,
+  getInstantlyLoadedCountToday,
   updateLeadStatus,
   batchUpdateLeadStatus,
   getPipelineStats,
