@@ -18,6 +18,9 @@ import {
   upsertDailyReport,
   upsertCampaignDailyAnalytics,
 } from '../../lib/supabase-pipeline.js';
+import { validateRequiredEnv, getTodayDateString } from '../../lib/utils.js';
+import { API_ENDPOINTS } from '../../lib/constants.js';
+import { buildDailyReportMessage } from '../../lib/slack-templates.js';
 
 /** Instantly daily campaign analytics response row */
 interface InstantlyDailyRow {
@@ -45,7 +48,6 @@ function getCampaignIds(): string[] {
   return id ? [id] : [];
 }
 
-/** Fetch daily campaign analytics from Instantly API v2 */
 async function fetchInstantlyDailyAnalytics(
   reportDate: string,
   campaignId: string
@@ -56,18 +58,18 @@ async function fetchInstantlyDailyAnalytics(
   const params = new URLSearchParams({
     campaign_id: campaignId,
     start_date: reportDate,
-    end_date: reportDate
+    end_date: reportDate,
   });
-  const url = `https://api.instantly.ai/api/v2/campaigns/analytics/daily?${params}`;
+  const url = `${API_ENDPOINTS.INSTANTLY.ANALYTICS_DAILY}?${params}`;
 
   try {
     const res = await fetch(url, {
-      headers: { 'Authorization': `Bearer ${apiKey}` }
+      headers: { Authorization: `Bearer ${apiKey}` },
     });
     if (!res.ok) return null;
 
     const data = await res.json();
-    const rows = Array.isArray(data) ? data : data.items ?? [];
+    const rows = Array.isArray(data) ? data : (data.items ?? []);
     return rows.find((r: InstantlyDailyRow) => r.date === reportDate) ?? rows[0] ?? null;
   } catch {
     return null;
@@ -75,14 +77,14 @@ async function fetchInstantlyDailyAnalytics(
 }
 
 async function main() {
-  const startTime = Date.now();
-  const reportDate =
-    process.env.REPORT_DATE || new Date().toISOString().split('T')[0];
+  validateRequiredEnv(['SUPABASE_DB_URL']);
+
+  const reportDate = process.env.REPORT_DATE || getTodayDateString();
   console.log(`Report Build – aggregating metrics for ${reportDate}`);
 
   const db = getDb();
   if (!db) {
-    console.error('❌ SUPABASE_DB_URL not set; cannot read from DB');
+    console.error('❌ Failed to connect to database');
     process.exit(1);
   }
 
@@ -169,25 +171,32 @@ async function main() {
     },
   };
 
-  const text = [
-    `*OpenClaw Daily Report — ${reportDate}*`,
-    primaryCampaignId ? `Campaign: ${primaryCampaignId.slice(0, 8)}...` : '',
-    '',
-    '*Lead Pipeline*',
-    `• Apollo IDs found: ${person_ids_count}`,
-    `• Leads with email: ${leads_pulled}`,
-    `• Bouncer verified: ${leads_validated} (${dr.toFixed(1)}% deliverable)`,
-    `• Removed: ${leads_removed} (bounce/invalid ≈ ${br.toFixed(2)}%)`,
-    `• Pushed to Instantly: ${pushed_ok} ok / ${pushed_failed} failed`,
-    '',
-    '*Campaign (Instantly API)*',
-    `• Emails sent: ${sent}`,
-    `• Opens: ${opened} (${openRatePct}%)`,
-    `• Replies: ${repliesInst} (${replyRatePct}%)`,
-    replies_fetched > 0
-      ? ['', '*Reply Classification (LLM)*', `• Hot: ${hot_count}  |  Soft: ${soft_count}  |  Objection: ${objection_count}  |  Negative: ${negative_count} (${nr.toFixed(2)}%)`].join('\n')
-      : '',
-  ].filter(Boolean).join('\n');
+  const text = buildDailyReportMessage({
+    reportDate,
+    campaignIdShort: primaryCampaignId ? `${primaryCampaignId.slice(0, 8)}...` : undefined,
+    personIdsCount: person_ids_count,
+    leadsPulled: leads_pulled,
+    leadsValidated: leads_validated,
+    leadsRemoved: leads_removed,
+    deliverableRatePct: `${dr.toFixed(1)}%`,
+    bounceRatePct: `${br.toFixed(2)}%`,
+    pushedOk: pushed_ok,
+    pushedFailed: pushed_failed,
+    sent,
+    opened,
+    openRatePct: `${openRatePct}%`,
+    repliesInst,
+    replyRatePct: `${replyRatePct}%`,
+    repliesFetched: replies_fetched,
+    hotCount: hot_count,
+    softCount: soft_count,
+    objectionCount: objection_count,
+    negativeCount: negative_count,
+    negativeRatePct: `${nr.toFixed(2)}%`,
+    outOfOfficeCount: metrics.out_of_office_count ?? 0,
+    autoReplyCount: metrics.auto_reply_count ?? 0,
+    notAReplyCount: metrics.not_a_reply_count ?? 0,
+  });
 
   await upsertDailyReport(db, reportDate, metrics, report, {
     campaignId: primaryCampaignId,

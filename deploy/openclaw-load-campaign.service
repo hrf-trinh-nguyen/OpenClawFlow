@@ -1,0 +1,15 @@
+[Unit]
+Description=OpenClaw Load Campaign Batch (instantly load)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=deploy
+WorkingDirectory=/home/deploy/openclaw-mvp
+Environment=HOME=/home/deploy
+Environment=PATH=/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-/home/deploy/openclaw-mvp/.env
+ExecStart=/home/deploy/openclaw-mvp/scripts/run-load-campaign.sh
+StandardOutput=journal
+StandardError=journal

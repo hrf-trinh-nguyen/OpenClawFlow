@@ -14,26 +14,29 @@
  */
 
 import { getDb } from '../../lib/supabase-pipeline.js';
+import { validateRequiredEnv, parseIntSafe } from '../../lib/utils.js';
+import { LEAD_STATUSES, isValidLeadStatus, type LeadStatus } from '../../lib/constants.js';
 
-const VALID_STATUSES = [
-  'new',
-  'apollo_matched',
-  'bouncer_verified',
-  'instantly_loaded',
-  'replied',
-  'failed'
-] as const;
-
-type Status = (typeof VALID_STATUSES)[number];
-
-function isValidStatus(s: string): s is Status {
-  return VALID_STATUSES.includes(s as Status);
+function printUsage(): void {
+  console.log('── Supported statuses ──');
+  for (const s of LEAD_STATUSES) {
+    console.log(`  ${s}`);
+  }
+  console.log('\nUsage:');
+  console.log('  FROM_STATUS=<from> TO_STATUS=<to> node workspace/skills/lead-move/index.mjs');
+  console.log('\nExamples:');
+  console.log('  # Move failed leads back to apollo_matched (retry Bouncer)');
+  console.log('  FROM_STATUS=failed TO_STATUS=apollo_matched node workspace/skills/lead-move/index.mjs');
+  console.log('\n  # Reset failed to new');
+  console.log('  FROM_STATUS=failed TO_STATUS=new node workspace/skills/lead-move/index.mjs');
 }
 
 async function main() {
+  validateRequiredEnv(['SUPABASE_DB_URL']);
+
   const db = getDb();
   if (!db) {
-    console.error('❌ SUPABASE_DB_URL not found in env');
+    console.error('❌ Failed to connect to database');
     process.exit(1);
   }
 
@@ -42,31 +45,20 @@ async function main() {
 
   console.log('\n📦 Lead Move Skill\n');
 
-  // List statuses if no params
   if (!fromStatus || !toStatus) {
-    console.log('── Supported statuses ──');
-    for (const s of VALID_STATUSES) {
-      console.log(`  ${s}`);
-    }
-    console.log('\nUsage:');
-    console.log('  FROM_STATUS=<from> TO_STATUS=<to> node workspace/skills/lead-move/index.mjs');
-    console.log('\nExamples:');
-    console.log('  # Move failed leads back to apollo_matched (retry Bouncer)');
-    console.log('  FROM_STATUS=failed TO_STATUS=apollo_matched node workspace/skills/lead-move/index.mjs');
-    console.log('\n  # Reset failed to new');
-    console.log('  FROM_STATUS=failed TO_STATUS=new node workspace/skills/lead-move/index.mjs');
+    printUsage();
     await db.end();
     return;
   }
 
-  if (!isValidStatus(fromStatus)) {
+  if (!isValidLeadStatus(fromStatus)) {
     console.error(`❌ Invalid FROM_STATUS: ${fromStatus}`);
-    console.error(`   Valid: ${VALID_STATUSES.join(', ')}`);
+    console.error(`   Valid: ${LEAD_STATUSES.join(', ')}`);
     process.exit(1);
   }
-  if (!isValidStatus(toStatus)) {
+  if (!isValidLeadStatus(toStatus)) {
     console.error(`❌ Invalid TO_STATUS: ${toStatus}`);
-    console.error(`   Valid: ${VALID_STATUSES.join(', ')}`);
+    console.error(`   Valid: ${LEAD_STATUSES.join(', ')}`);
     process.exit(1);
   }
 
@@ -75,11 +67,10 @@ async function main() {
     process.exit(1);
   }
 
-  const limitRaw = process.env.LIMIT?.trim();
-  const limit = limitRaw ? Math.max(1, parseInt(limitRaw, 10) || 0) : null;
+  const limit = process.env.LIMIT ? parseIntSafe(process.env.LIMIT, 0) : null;
+  const effectiveLimit = limit && limit > 0 ? limit : null;
 
   try {
-    // Count before
     const countRes = await db.query(
       `SELECT COUNT(*) as c FROM leads WHERE processing_status = $1::lead_processing_status`,
       [fromStatus]
@@ -92,9 +83,8 @@ async function main() {
       return;
     }
 
-    // Update (with optional LIMIT via subquery)
     const updateRes = await db.query(
-      limit != null
+      effectiveLimit != null
         ? `UPDATE leads
            SET processing_status = $1::lead_processing_status, updated_at = NOW()
            WHERE id IN (
@@ -108,7 +98,7 @@ async function main() {
            SET processing_status = $1::lead_processing_status, updated_at = NOW()
            WHERE processing_status = $2::lead_processing_status
            RETURNING id`,
-      limit != null ? [toStatus, fromStatus, limit] : [toStatus, fromStatus]
+      effectiveLimit != null ? [toStatus, fromStatus, effectiveLimit] : [toStatus, fromStatus]
     );
 
     const updated = updateRes.rowCount ?? 0;

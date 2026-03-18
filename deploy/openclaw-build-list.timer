@@ -1,0 +1,11 @@
+[Unit]
+Description=Run OpenClaw Build List at 3AM, 4AM, 5AM PT
+
+[Timer]
+OnCalendar=*-*-* 03,04,05:00:00
+Timezone=America/Los_Angeles
+Persistent=true
+Unit=openclaw-build-list.service
+
+[Install]
+WantedBy=timers.target

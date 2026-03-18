@@ -14,26 +14,29 @@
  */
 
 import { getDb } from '../../lib/supabase-pipeline.js';
+import { validateRequiredEnv } from '../../lib/utils.js';
+import { LEAD_STATUSES, isValidLeadStatus } from '../../lib/constants.js';
 
-const VALID_STATUSES = [
-  'new',
-  'apollo_matched',
-  'bouncer_verified',
-  'instantly_loaded',
-  'replied',
-  'failed'
-] as const;
-
-type Status = (typeof VALID_STATUSES)[number];
-
-function isValidStatus(s: string): s is Status {
-  return VALID_STATUSES.includes(s as Status);
+function printUsage(): void {
+  console.log('── Supported statuses (delete by) ──');
+  for (const s of LEAD_STATUSES) {
+    console.log(`  ${s}`);
+  }
+  console.log('\nUsage:');
+  console.log('  DELETE_STATUS=<status> node workspace/skills/lead-delete/index.mjs');
+  console.log('\nExamples:');
+  console.log('  # Delete all failed leads');
+  console.log('  DELETE_STATUS=failed node workspace/skills/lead-delete/index.mjs');
+  console.log('\n  # Delete all apollo_matched (e.g. before re-collecting)');
+  console.log('  DELETE_STATUS=apollo_matched node workspace/skills/lead-delete/index.mjs');
 }
 
 async function main() {
+  validateRequiredEnv(['SUPABASE_DB_URL']);
+
   const db = getDb();
   if (!db) {
-    console.error('❌ SUPABASE_DB_URL not found in env');
+    console.error('❌ Failed to connect to database');
     process.exit(1);
   }
 
@@ -41,26 +44,15 @@ async function main() {
 
   console.log('\n🗑️  Lead Delete Skill\n');
 
-  // List statuses if no params
   if (!deleteStatus) {
-    console.log('── Supported statuses (delete by) ──');
-    for (const s of VALID_STATUSES) {
-      console.log(`  ${s}`);
-    }
-    console.log('\nUsage:');
-    console.log('  DELETE_STATUS=<status> node workspace/skills/lead-delete/index.mjs');
-    console.log('\nExamples:');
-    console.log('  # Delete all failed leads');
-    console.log('  DELETE_STATUS=failed node workspace/skills/lead-delete/index.mjs');
-    console.log('\n  # Delete all apollo_matched (e.g. before re-collecting)');
-    console.log('  DELETE_STATUS=apollo_matched node workspace/skills/lead-delete/index.mjs');
+    printUsage();
     await db.end();
     return;
   }
 
-  if (!isValidStatus(deleteStatus)) {
+  if (!isValidLeadStatus(deleteStatus)) {
     console.error(`❌ Invalid DELETE_STATUS: ${deleteStatus}`);
-    console.error(`   Valid: ${VALID_STATUSES.join(', ')}`);
+    console.error(`   Valid: ${LEAD_STATUSES.join(', ')}`);
     process.exit(1);
   }
 

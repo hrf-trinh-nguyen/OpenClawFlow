@@ -27,6 +27,6 @@ CREATE INDEX IF NOT EXISTS idx_replies_reply_category ON replies(reply_category)
 CREATE INDEX IF NOT EXISTS idx_replies_classified_at ON replies(classified_at);
 
 COMMENT ON COLUMN replies.body_snippet IS 'First 500 chars of reply body (from Instantly fetch)';
-COMMENT ON COLUMN replies.reply_category IS 'LLM classification: hot, soft, objection, negative';
+COMMENT ON COLUMN replies.reply_category IS 'Classification: hot/soft/objection/negative = customer reply; out_of_office/auto_reply/not_a_reply = not genuine reply';
 COMMENT ON COLUMN replies.category_confidence IS 'Confidence 0-1 from LLM classification';
 COMMENT ON COLUMN replies.classified_at IS 'When this reply was classified by LLM';

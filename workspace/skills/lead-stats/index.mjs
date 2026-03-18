@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// lib/supabase-pipeline.ts
+// lib/db/connection.ts
 import { Pool } from "pg";
 var pool = null;
 function getDb() {
@@ -16,11 +16,35 @@ function getDb() {
   return pool;
 }
 
+// lib/utils.ts
+function checkRequiredEnv(keys) {
+  const missing = keys.filter((key) => !process.env[key]);
+  return { valid: missing.length === 0, missing };
+}
+function validateRequiredEnv(keys) {
+  const { valid, missing } = checkRequiredEnv(keys);
+  if (!valid) {
+    console.error(`\u274C Missing required environment variables: ${missing.join(", ")}`);
+    process.exit(1);
+  }
+}
+function truncate(str, maxLength) {
+  if (str.length <= maxLength) return str;
+  return str.slice(0, maxLength - 3) + "...";
+}
+
 // skills/lead-stats/index.ts
+function detectFailureStep(reason) {
+  if (reason.includes("Bouncer") || reason.includes("deliverable")) return "Bouncer";
+  if (reason.includes("Apollo")) return "Apollo";
+  if (reason.includes("Instantly")) return "Instantly";
+  return "?";
+}
 async function main() {
+  validateRequiredEnv(["SUPABASE_DB_URL"]);
   const db = getDb();
   if (!db) {
-    console.error("\u274C SUPABASE_DB_URL not found in env");
+    console.error("\u274C Failed to connect to database");
     process.exit(1);
   }
   console.log("\n\u{1F4CA} Lead pipeline statistics\n");
@@ -51,9 +75,9 @@ async function main() {
       console.log("\u2500\u2500 Failed leads by reason (processing_error) \u2500\u2500");
       console.log("   (Most failures are at Bouncer step: email verify)");
       for (const row of failedRes.rows) {
-        const reason = (row.reason || "(no error message)").slice(0, 80);
-        const step = reason.includes("Bouncer") || reason.includes("deliverable") ? "Bouncer" : reason.includes("Apollo") ? "Apollo" : reason.includes("Instantly") ? "Instantly" : "?";
-        console.log(`  ${row.count}: [${step}] ${reason}${reason.length >= 80 ? "..." : ""}`);
+        const reason = row.reason || "(no error message)";
+        const step = detectFailureStep(reason);
+        console.log(`  ${row.count}: [${step}] ${truncate(reason, 80)}`);
       }
       console.log("");
     }

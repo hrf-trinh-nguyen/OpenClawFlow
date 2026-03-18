@@ -13,31 +13,41 @@
  * - SUPABASE_DB_URL: PostgreSQL connection string
  */
 
-import { getDb, createPipelineRun, updatePipelineRun, createServiceExecution, updateServiceExecution, getLeadsByStatus, batchUpdateLeadStatus } from '../../lib/supabase-pipeline.js';
+import {
+  getDb,
+  createPipelineRun,
+  updatePipelineRun,
+  createServiceExecution,
+  updateServiceExecution,
+  getLeadsByStatus,
+  batchUpdateLeadStatus,
+} from '../../lib/supabase-pipeline.js';
+import { sleep, validateRequiredEnv, clamp, parseIntSafe, dedupeByEmail } from '../../lib/utils.js';
+import { RATE_LIMITS, DEFAULTS, API_ENDPOINTS } from '../../lib/constants.js';
 
 // ── Configuration ──────────────────────────────────────────────────
 
-const BOUNCER_API_KEY = process.env.BOUNCER_API_KEY;
-const BOUNCER_BATCH_SIZE = Math.min(1000, Math.max(1, parseInt(process.env.BOUNCER_BATCH_SIZE || '1000', 10)));
+validateRequiredEnv(['BOUNCER_API_KEY', 'SUPABASE_DB_URL']);
 
-if (!BOUNCER_API_KEY) {
-  console.error('❌ BOUNCER_API_KEY not found in env');
-  process.exit(1);
-}
+const BOUNCER_API_KEY = process.env.BOUNCER_API_KEY!;
+const BOUNCER_BATCH_SIZE = clamp(
+  parseIntSafe(process.env.BOUNCER_BATCH_SIZE, DEFAULTS.BOUNCER_BATCH_SIZE),
+  1,
+  RATE_LIMITS.BOUNCER_BATCH_SIZE_MAX
+);
 
 // ── Bouncer API ────────────────────────────────────────────────────
 
 async function bouncerSubmitBatch(emails: string[]): Promise<string> {
-  const url = 'https://api.usebouncer.com/v1.1/email/verify/batch';
   const body = emails.map((email) => ({ email }));
 
-  const response = await fetch(url, {
+  const response = await fetch(API_ENDPOINTS.BOUNCER.SUBMIT_BATCH, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': BOUNCER_API_KEY
+      'x-api-key': BOUNCER_API_KEY,
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
@@ -46,19 +56,17 @@ async function bouncerSubmitBatch(emails: string[]): Promise<string> {
   }
 
   const data = await response.json();
-  
+
   if (!data.batchId) {
     throw new Error('Bouncer did not return batchId');
   }
-  
+
   return data.batchId;
 }
 
 async function bouncerGetBatchStatus(batchId: string): Promise<{ status: string }> {
-  const url = `https://api.usebouncer.com/v1.1/email/verify/batch/${batchId}`;
-
-  const response = await fetch(url, {
-    headers: { 'x-api-key': BOUNCER_API_KEY }
+  const response = await fetch(API_ENDPOINTS.BOUNCER.GET_STATUS(batchId), {
+    headers: { 'x-api-key': BOUNCER_API_KEY },
   });
 
   if (!response.ok) {
@@ -71,10 +79,8 @@ async function bouncerGetBatchStatus(batchId: string): Promise<{ status: string 
 }
 
 async function bouncerDownloadResults(batchId: string): Promise<any[]> {
-  const url = `https://api.usebouncer.com/v1.1/email/verify/batch/${batchId}/download?download=all`;
-
-  const response = await fetch(url, {
-    headers: { 'x-api-key': BOUNCER_API_KEY }
+  const response = await fetch(API_ENDPOINTS.BOUNCER.DOWNLOAD(batchId), {
+    headers: { 'x-api-key': BOUNCER_API_KEY },
   });
 
   if (response.status === 405) {
@@ -89,9 +95,12 @@ async function bouncerDownloadResults(batchId: string): Promise<any[]> {
   return Array.isArray(data) ? data : [];
 }
 
-async function bouncerPollBatch(batchId: string, maxWaitMs: number = 300000): Promise<any[]> {
+async function bouncerPollBatch(
+  batchId: string,
+  maxWaitMs: number = RATE_LIMITS.BOUNCER_MAX_WAIT_MS
+): Promise<any[]> {
   const startTime = Date.now();
-  const pollInterval = 5000;
+  const pollInterval = RATE_LIMITS.BOUNCER_POLL_INTERVAL_MS;
 
   console.log(`   ⏳ Polling batch ${batchId}...`);
 
@@ -108,7 +117,7 @@ async function bouncerPollBatch(batchId: string, maxWaitMs: number = 300000): Pr
     }
 
     console.log(`      Status: ${status}, waiting ${pollInterval / 1000}s...`);
-    await new Promise((resolve) => setTimeout(resolve, pollInterval));
+    await sleep(pollInterval);
   }
 
   throw new Error(`Bouncer batch timed out after ${maxWaitMs / 1000}s`);
@@ -117,8 +126,8 @@ async function bouncerPollBatch(batchId: string, maxWaitMs: number = 300000): Pr
 // ── Main Service ───────────────────────────────────────────────────
 
 async function main() {
-  console.log(`\\n🔍 Bouncer Service Starting`);
-  console.log(`   Batch size: ${BOUNCER_BATCH_SIZE}\\n`);
+  console.log(`\n🔍 Bouncer Service Starting`);
+  console.log(`   Batch size: ${BOUNCER_BATCH_SIZE}\n`);
 
   const db = getDb();
   if (!db) {
@@ -126,16 +135,15 @@ async function main() {
     process.exit(1);
   }
 
-  // Check for leads pending verification
   const pendingLeads = await getLeadsByStatus(db, 'apollo_matched', 10000);
-  
+
   if (pendingLeads.length === 0) {
-    console.log('ℹ️  No leads pending verification (status=apollo_matched)\\n');
+    console.log('ℹ️  No leads pending verification (status=apollo_matched)\n');
     await db.end();
     return;
   }
 
-  console.log(`📊 Found ${pendingLeads.length} leads pending verification\\n`);
+  console.log(`📊 Found ${pendingLeads.length} leads pending verification\n`);
 
   // Create pipeline run
   const runId = await createPipelineRun(db, {
@@ -167,28 +175,21 @@ async function main() {
       });
 
       try {
-        // Validate: dedupe by email (no duplicate emails in batch)
-        const seen = new Set<string>();
-        const uniqueBatch = batch.filter((l) => {
-          const e = (l.email || '').trim().toLowerCase();
-          if (!e || seen.has(e)) return false;
-          seen.add(e);
-          return true;
-        });
+        const uniqueBatch = dedupeByEmail(batch);
         const dupInBatch = batch.length - uniqueBatch.length;
         if (dupInBatch > 0) {
           console.log(`   ⚠️  Skipped ${dupInBatch} duplicate email(s) in batch`);
         }
 
-        const emails = uniqueBatch.map(l => l.email).filter(e => e);
-        
+        const emails = uniqueBatch.map((l) => l.email).filter((e): e is string => !!e);
+
         if (emails.length === 0) {
-          console.log('   ⚠️  No valid emails in batch, skipping\\n');
+          console.log('   ⚠️  No valid emails in batch, skipping\n');
           await updateServiceExecution(db, execId, {
             status: 'completed',
             completed_at: new Date(),
             output_count: 0,
-            failed_count: batch.length
+            failed_count: batch.length,
           });
           continue;
         }
@@ -241,43 +242,44 @@ async function main() {
 
         totalProcessed += uniqueBatch.length;
 
-        console.log(`   ✅ Batch ${batchNum} complete: ${deliverableIds.length} deliverable, ${failedIds.length} invalid`);
-        console.log(`   📊 Progress: ${totalProcessed}/${pendingLeads.length} (${Math.round(totalProcessed / pendingLeads.length * 100)}%)\\n`);
+        console.log(
+          `   ✅ Batch ${batchNum} complete: ${deliverableIds.length} deliverable, ${failedIds.length} invalid`
+        );
+        console.log(
+          `   📊 Progress: ${totalProcessed}/${pendingLeads.length} (${Math.round((totalProcessed / pendingLeads.length) * 100)}%)\n`
+        );
 
         await updateServiceExecution(db, execId, {
           status: 'completed',
           completed_at: new Date(),
           output_count: deliverableIds.length,
           failed_count: failedIds.length,
-          api_calls_made: 2
+          api_calls_made: 2,
         });
-
       } catch (error: any) {
         apiErrors++;
-        console.error(`   ❌ Batch ${batchNum} failed: ${error.message}\\n`);
+        console.error(`   ❌ Batch ${batchNum} failed: ${error.message}\n`);
 
         await updateServiceExecution(db, execId, {
           status: 'failed',
           completed_at: new Date(),
           api_errors: 1,
-          error_message: error.message
+          error_message: error.message,
         });
 
-        // Mark batch as failed
-        const failedIds = batch.filter(l => l.id).map(l => l.id!);
+        const failedIds = batch.filter((l) => l.id).map((l) => l.id!);
         if (failedIds.length > 0) {
           await batchUpdateLeadStatus(db, failedIds, 'failed', `Bouncer error: ${error.message}`);
           totalInvalid += failedIds.length;
         }
 
         if (error.message.includes('402')) {
-          console.log('   ⚠️  Insufficient credits, stopping\\n');
+          console.log('   ⚠️  Insufficient credits, stopping\n');
           break;
         }
       }
 
-      // Small delay between batches
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await sleep(RATE_LIMITS.BOUNCER_DELAY_BETWEEN_BATCHES_MS);
     }
 
     // Update pipeline run
@@ -289,27 +291,25 @@ async function main() {
       leads_failed: totalInvalid
     });
 
-    const deliverableRate = totalProcessed > 0 
-      ? (totalDeliverable / totalProcessed * 100).toFixed(1) 
-      : '0.0';
+    const deliverableRate =
+      totalProcessed > 0 ? ((totalDeliverable / totalProcessed) * 100).toFixed(1) : '0.0';
 
-    console.log(`\\n✅ Bouncer Service Complete`);
+    console.log(`\n✅ Bouncer Service Complete`);
     console.log(`   Total processed: ${totalProcessed} leads`);
     console.log(`   Deliverable: ${totalDeliverable} (${deliverableRate}%)`);
     console.log(`   Invalid: ${totalInvalid}`);
     console.log(`   API calls made: ${apiCallsMade}`);
-    console.log(`   API errors: ${apiErrors}\\n`);
-
+    console.log(`   API errors: ${apiErrors}\n`);
   } catch (error: any) {
-    console.error(`\\n❌ Bouncer Service Failed: ${error.message}\\n`);
-    
+    console.error(`\n❌ Bouncer Service Failed: ${error.message}\n`);
+
     await updatePipelineRun(db, runId, {
       status: 'failed',
       completed_at: new Date(),
       leads_processed: totalProcessed,
       leads_succeeded: totalDeliverable,
       leads_failed: totalInvalid,
-      error_message: error.message
+      error_message: error.message,
     });
 
     process.exit(1);

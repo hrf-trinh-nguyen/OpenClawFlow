@@ -14,7 +14,14 @@ export type CampaignStatus = 'active' | 'paused' | 'completed';
 export type EmailStatus = 'deliverable' | 'undeliverable' | 'risky' | 'unknown';
 export type LeadSource = 'apollo' | 'manual' | 'import';
 export type PushStatus = 'pending' | 'success' | 'failed';
-export type ReplyCategory = 'hot' | 'soft' | 'objection' | 'negative';
+export type ReplyCategory =
+  | 'hot'
+  | 'soft'
+  | 'objection'
+  | 'negative'
+  | 'out_of_office'
+  | 'auto_reply'
+  | 'not_a_reply';
 export type WorkflowName = 'build_list' | 'load_campaign' | 'process_replies' | 'daily_report';
 export type ExecutionStatus = 'running' | 'completed' | 'failed';
 export type TriggerType = 'cron' | 'manual' | 'api';

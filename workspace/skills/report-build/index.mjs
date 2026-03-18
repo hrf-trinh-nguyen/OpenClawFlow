@@ -20,7 +20,7 @@ function stateSet(key, value) {
   writeFileSync(resolve(STATE_DIR, `${key}.json`), JSON.stringify(value, null, 2), "utf8");
 }
 
-// lib/supabase-pipeline.ts
+// lib/db/connection.ts
 import { Pool } from "pg";
 var pool = null;
 function getDb() {
@@ -35,6 +35,8 @@ function getDb() {
   }
   return pool;
 }
+
+// lib/db/reports.ts
 async function getMetricsForReport(client, reportDate) {
   var _a;
   const metrics = {
@@ -49,6 +51,9 @@ async function getMetricsForReport(client, reportDate) {
     soft_count: 0,
     objection_count: 0,
     negative_count: 0,
+    out_of_office_count: 0,
+    auto_reply_count: 0,
+    not_a_reply_count: 0,
     deliverable_rate: 0,
     bounce_rate: 0,
     spam_complaint_rate: 0
@@ -111,6 +116,9 @@ async function getMetricsForReport(client, reportDate) {
       else if (row.category === "soft") metrics.soft_count = c;
       else if (row.category === "objection") metrics.objection_count = c;
       else if (row.category === "negative") metrics.negative_count = c;
+      else if (row.category === "out_of_office") metrics.out_of_office_count = c;
+      else if (row.category === "auto_reply") metrics.auto_reply_count = c;
+      else if (row.category === "not_a_reply") metrics.not_a_reply_count = c;
     }
   } else {
     const classRes = await client.query(
@@ -224,6 +232,95 @@ async function upsertCampaignDailyAnalytics(client, reportDate, campaignId, data
   );
 }
 
+// lib/utils.ts
+function checkRequiredEnv(keys) {
+  const missing = keys.filter((key) => !process.env[key]);
+  return { valid: missing.length === 0, missing };
+}
+function validateRequiredEnv(keys) {
+  const { valid, missing } = checkRequiredEnv(keys);
+  if (!valid) {
+    console.error(`\u274C Missing required environment variables: ${missing.join(", ")}`);
+    process.exit(1);
+  }
+}
+function getTodayDateString() {
+  return (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+}
+
+// lib/constants.ts
+var CUSTOMER_REPLY_CATEGORIES = ["hot", "soft", "objection", "negative"];
+var NON_REPLY_CATEGORIES = ["out_of_office", "auto_reply", "not_a_reply"];
+var REPLY_CATEGORIES = [
+  ...CUSTOMER_REPLY_CATEGORIES,
+  ...NON_REPLY_CATEGORIES
+];
+var SLACK_CHANNELS = {
+  REPORT: process.env.SLACK_REPORT_CHANNEL || "",
+  ALERT: process.env.SLACK_ALERT_CHANNEL || ""
+};
+var API_ENDPOINTS = {
+  APOLLO: {
+    SEARCH: "https://api.apollo.io/api/v1/mixed_people/api_search",
+    BULK_MATCH: "https://api.apollo.io/api/v1/people/bulk_match"
+  },
+  BOUNCER: {
+    SUBMIT_BATCH: "https://api.usebouncer.com/v1.1/email/verify/batch",
+    GET_STATUS: (batchId) => `https://api.usebouncer.com/v1.1/email/verify/batch/${batchId}`,
+    DOWNLOAD: (batchId) => `https://api.usebouncer.com/v1.1/email/verify/batch/${batchId}/download?download=all`
+  },
+  INSTANTLY: {
+    ADD_LEADS: "https://api.instantly.ai/api/v2/leads/add",
+    EMAILS: "https://api.instantly.ai/api/v2/emails",
+    UNREAD_COUNT: (campaignId) => `https://api.instantly.ai/api/v2/emails/unread/count?campaign_id=${campaignId}`,
+    REPLY: "https://api.instantly.ai/api/v2/emails/reply",
+    ANALYTICS_DAILY: "https://api.instantly.ai/api/v2/campaigns/analytics/daily"
+  },
+  OPENAI: {
+    CHAT_COMPLETIONS: "https://api.openai.com/v1/chat/completions"
+  },
+  SLACK: {
+    POST_MESSAGE: "https://slack.com/api/chat.postMessage"
+  }
+};
+var CLASSIFICATION_MODEL = process.env.REPLY_CLASSIFICATION_MODEL || "gpt-4o";
+
+// lib/slack-templates.ts
+function buildDailyReportMessage(p) {
+  const lines = [
+    `\u{1F4CA} *OpenClaw Daily Report*`,
+    `Date: ${p.reportDate}${p.campaignIdShort ? `  |  Campaign: ${p.campaignIdShort}` : ""}`,
+    `\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550`,
+    ``,
+    `*Lead Pipeline*`,
+    `\u2022 Apollo IDs found: ${p.personIdsCount}`,
+    `\u2022 Leads with email: ${p.leadsPulled}`,
+    `\u2022 Bouncer verified: ${p.leadsValidated} (${p.deliverableRatePct} deliverable)`,
+    `\u2022 Removed: ${p.leadsRemoved} (bounce ${p.bounceRatePct})`,
+    `\u2022 Pushed to Instantly: ${p.pushedOk} ok / ${p.pushedFailed} failed`,
+    ``,
+    `*Campaign (Instantly)*`,
+    `\u2022 Emails sent: ${p.sent}`,
+    `\u2022 Opens: ${p.opened} (${p.openRatePct})`,
+    `\u2022 Replies: ${p.repliesInst} (${p.replyRatePct})`
+  ];
+  if (p.repliesFetched > 0) {
+    lines.push(
+      ``,
+      `*Reply Classification (customer reply only)*`,
+      `\u2022 Hot: ${p.hotCount}  |  Soft: ${p.softCount}  |  Objection: ${p.objectionCount}  |  Negative: ${p.negativeCount} (${p.negativeRatePct})`
+    );
+    const ooo = p.outOfOfficeCount ?? 0;
+    const ar = p.autoReplyCount ?? 0;
+    const nar = p.notAReplyCount ?? 0;
+    if (ooo + ar + nar > 0) {
+      lines.push(`\u2022 Not customer reply: Out of office ${ooo}  |  Auto-reply ${ar}  |  Not a reply ${nar}`);
+    }
+  }
+  lines.push(``, `\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550`);
+  return lines.join("\n");
+}
+
 // skills/report-build/index.ts
 function getCampaignIds() {
   const ids = process.env.INSTANTLY_CAMPAIGN_IDS;
@@ -241,10 +338,10 @@ async function fetchInstantlyDailyAnalytics(reportDate, campaignId) {
     start_date: reportDate,
     end_date: reportDate
   });
-  const url = `https://api.instantly.ai/api/v2/campaigns/analytics/daily?${params}`;
+  const url = `${API_ENDPOINTS.INSTANTLY.ANALYTICS_DAILY}?${params}`;
   try {
     const res = await fetch(url, {
-      headers: { "Authorization": `Bearer ${apiKey}` }
+      headers: { Authorization: `Bearer ${apiKey}` }
     });
     if (!res.ok) return null;
     const data = await res.json();
@@ -255,12 +352,12 @@ async function fetchInstantlyDailyAnalytics(reportDate, campaignId) {
   }
 }
 async function main() {
-  const startTime = Date.now();
-  const reportDate = process.env.REPORT_DATE || (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+  validateRequiredEnv(["SUPABASE_DB_URL"]);
+  const reportDate = process.env.REPORT_DATE || getTodayDateString();
   console.log(`Report Build \u2013 aggregating metrics for ${reportDate}`);
   const db = getDb();
   if (!db) {
-    console.error("\u274C SUPABASE_DB_URL not set; cannot read from DB");
+    console.error("\u274C Failed to connect to database");
     process.exit(1);
   }
   const metrics = await getMetricsForReport(db, reportDate);
@@ -338,23 +435,32 @@ async function main() {
       negative_rate: `${nr.toFixed(2)}%`
     }
   };
-  const text = [
-    `*OpenClaw Daily Report \u2014 ${reportDate}*`,
-    primaryCampaignId ? `Campaign: ${primaryCampaignId.slice(0, 8)}...` : "",
-    "",
-    "*Lead Pipeline*",
-    `\u2022 Apollo IDs found: ${person_ids_count}`,
-    `\u2022 Leads with email: ${leads_pulled}`,
-    `\u2022 Bouncer verified: ${leads_validated} (${dr.toFixed(1)}% deliverable)`,
-    `\u2022 Removed: ${leads_removed} (bounce/invalid \u2248 ${br.toFixed(2)}%)`,
-    `\u2022 Pushed to Instantly: ${pushed_ok} ok / ${pushed_failed} failed`,
-    "",
-    "*Campaign (Instantly API)*",
-    `\u2022 Emails sent: ${sent}`,
-    `\u2022 Opens: ${opened} (${openRatePct}%)`,
-    `\u2022 Replies: ${repliesInst} (${replyRatePct}%)`,
-    replies_fetched > 0 ? ["", "*Reply Classification (LLM)*", `\u2022 Hot: ${hot_count}  |  Soft: ${soft_count}  |  Objection: ${objection_count}  |  Negative: ${negative_count} (${nr.toFixed(2)}%)`].join("\n") : ""
-  ].filter(Boolean).join("\n");
+  const text = buildDailyReportMessage({
+    reportDate,
+    campaignIdShort: primaryCampaignId ? `${primaryCampaignId.slice(0, 8)}...` : void 0,
+    personIdsCount: person_ids_count,
+    leadsPulled: leads_pulled,
+    leadsValidated: leads_validated,
+    leadsRemoved: leads_removed,
+    deliverableRatePct: `${dr.toFixed(1)}%`,
+    bounceRatePct: `${br.toFixed(2)}%`,
+    pushedOk: pushed_ok,
+    pushedFailed: pushed_failed,
+    sent,
+    opened,
+    openRatePct: `${openRatePct}%`,
+    repliesInst,
+    replyRatePct: `${replyRatePct}%`,
+    repliesFetched: replies_fetched,
+    hotCount: hot_count,
+    softCount: soft_count,
+    objectionCount: objection_count,
+    negativeCount: negative_count,
+    negativeRatePct: `${nr.toFixed(2)}%`,
+    outOfOfficeCount: metrics.out_of_office_count ?? 0,
+    autoReplyCount: metrics.auto_reply_count ?? 0,
+    notAReplyCount: metrics.not_a_reply_count ?? 0
+  });
   await upsertDailyReport(db, reportDate, metrics, report, {
     campaignId: primaryCampaignId,
     sent,

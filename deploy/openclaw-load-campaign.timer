@@ -1,0 +1,11 @@
+[Unit]
+Description=Run OpenClaw Load Campaign at 5:15AM and 5:45AM PT
+
+[Timer]
+OnCalendar=*-*-* 05:15,05:45:00
+Timezone=America/Los_Angeles
+Persistent=true
+Unit=openclaw-load-campaign.service
+
+[Install]
+WantedBy=timers.target

@@ -12,67 +12,78 @@
  * ORGANIZATION_INDUSTRY_TAG_IDS (override), APOLLO_API_KEY, SUPABASE_DB_URL, BATCH_ID
  */
 
-import { getDb, createPipelineRun, updatePipelineRun, createServiceExecution, updateServiceExecution, insertNewLeads } from '../../lib/supabase-pipeline.js';
-
-// ── Filters: US/CA, 10–50 employees, 3 industries, verified emails only ─────
-
-const PERSON_LOCATIONS = ['United States', 'Canada'];
-const ORGANIZATION_LOCATIONS = ['United States', 'Canada'];
-const ORGANIZATION_NUM_EMPLOYEES_RANGES = ['11,20', '21,50'];
-const ORGANIZATION_INDUSTRY_TAG_IDS = ['5567cd4e7369643b70010000', '5567cd467369644d39040000', '5567ced173696450cb580000']; // Computer Software, Marketing & Advertising, Retail
-const CONTACT_EMAIL_STATUS = ['verified'];
+import {
+  getDb,
+  createPipelineRun,
+  updatePipelineRun,
+  createServiceExecution,
+  updateServiceExecution,
+  insertNewLeads,
+} from '../../lib/supabase-pipeline.js';
+import {
+  sleep,
+  validateRequiredEnv,
+  parseIntSafe,
+  parseJsonSafe,
+  dedupeByEmail,
+} from '../../lib/utils.js';
+import { APOLLO_ICP_DEFAULTS, DEFAULTS, RATE_LIMITS, API_ENDPOINTS } from '../../lib/constants.js';
 
 // ── Configuration ──────────────────────────────────────────────────
 
-const TARGET_COUNT = parseInt(process.env.TARGET_COUNT || '5', 10);
-const PERSON_TITLES = process.env.PERSON_TITLES ? JSON.parse(process.env.PERSON_TITLES) : ['vp marketing', 'head of marketing', 'vp sales', 'director of marketing', 'director of sales'];
-const ORGANIZATION_INDUSTRY_TAG_IDS_FINAL = process.env.ORGANIZATION_INDUSTRY_TAG_IDS ? JSON.parse(process.env.ORGANIZATION_INDUSTRY_TAG_IDS) : ORGANIZATION_INDUSTRY_TAG_IDS;
-const APOLLO_API_KEY = process.env.APOLLO_API_KEY;
+validateRequiredEnv(['APOLLO_API_KEY', 'SUPABASE_DB_URL']);
+
+const APOLLO_API_KEY = process.env.APOLLO_API_KEY!;
+const TARGET_COUNT = parseIntSafe(process.env.TARGET_COUNT, DEFAULTS.TARGET_COUNT);
 const BATCH_ID = process.env.BATCH_ID || `apollo-${Date.now()}`;
 
-if (!APOLLO_API_KEY) {
-  console.error('❌ APOLLO_API_KEY not found in env');
-  process.exit(1);
-}
+const PERSON_TITLES = process.env.PERSON_TITLES
+  ? parseJsonSafe<string[]>(process.env.PERSON_TITLES, APOLLO_ICP_DEFAULTS.PERSON_TITLES)
+  : APOLLO_ICP_DEFAULTS.PERSON_TITLES;
+
+const ORGANIZATION_INDUSTRY_TAG_IDS = process.env.ORGANIZATION_INDUSTRY_TAG_IDS
+  ? parseJsonSafe<string[]>(process.env.ORGANIZATION_INDUSTRY_TAG_IDS, APOLLO_ICP_DEFAULTS.ORGANIZATION_INDUSTRY_TAG_IDS)
+  : APOLLO_ICP_DEFAULTS.ORGANIZATION_INDUSTRY_TAG_IDS;
 
 // ── Apollo API ─────────────────────────────────────────────────────
 
-async function apolloSearchPeople(page: number = 1, perPage: number = 100): Promise<{ person_ids: string[]; total_pages: number; api_credits: number }> {
-  const url = 'https://api.apollo.io/api/v1/mixed_people/api_search';
+interface ApolloSearchResult {
+  person_ids: string[];
+  total_pages: number;
+  api_credits: number;
+}
 
+async function apolloSearchPeople(page: number = 1, perPage: number = 100): Promise<ApolloSearchResult> {
   const body: Record<string, unknown> = {
     page,
     per_page: perPage,
     person_titles: PERSON_TITLES,
-    person_locations: PERSON_LOCATIONS,
-    organization_locations: ORGANIZATION_LOCATIONS,
-    organization_num_employees_ranges: ORGANIZATION_NUM_EMPLOYEES_RANGES,
-    contact_email_status_v2: CONTACT_EMAIL_STATUS
+    person_locations: APOLLO_ICP_DEFAULTS.PERSON_LOCATIONS,
+    organization_locations: APOLLO_ICP_DEFAULTS.ORGANIZATION_LOCATIONS,
+    organization_num_employees_ranges: APOLLO_ICP_DEFAULTS.ORGANIZATION_NUM_EMPLOYEES_RANGES,
+    contact_email_status_v2: APOLLO_ICP_DEFAULTS.CONTACT_EMAIL_STATUS,
   };
-  if (ORGANIZATION_INDUSTRY_TAG_IDS_FINAL.length > 0) {
-    body.organization_industry_tag_ids = ORGANIZATION_INDUSTRY_TAG_IDS_FINAL;
+
+  if (ORGANIZATION_INDUSTRY_TAG_IDS.length > 0) {
+    body.organization_industry_tag_ids = ORGANIZATION_INDUSTRY_TAG_IDS;
   }
 
-  const response = await fetch(url, {
+  const response = await fetch(API_ENDPOINTS.APOLLO.SEARCH, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Cache-Control': 'no-cache',
-      'X-Api-Key': APOLLO_API_KEY
+      'X-Api-Key': APOLLO_API_KEY,
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
     const errBody = await response.text();
     let errMsg = `Apollo search failed: ${response.status} ${response.statusText}`;
     if (errBody) {
-      try {
-        const parsed = JSON.parse(errBody);
-        errMsg += ` — ${JSON.stringify(parsed)}`;
-      } catch {
-        errMsg += ` — ${errBody.slice(0, 200)}`;
-      }
+      const parsed = parseJsonSafe(errBody, null);
+      errMsg += parsed ? ` — ${JSON.stringify(parsed)}` : ` — ${errBody.slice(0, 200)}`;
     }
     throw new Error(errMsg);
   }
@@ -82,27 +93,37 @@ async function apolloSearchPeople(page: number = 1, perPage: number = 100): Prom
   return {
     person_ids: (data.people || []).map((p: any) => p.id),
     total_pages: data.pagination?.total_pages || 1,
-    api_credits: data.breadcrumb?.total_results || 0
+    api_credits: data.breadcrumb?.total_results || 0,
   };
 }
 
-async function apolloBulkMatch(personIds: string[]): Promise<any[]> {
+interface ApolloLead {
+  apollo_person_id: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  company_name: string;
+  title: string;
+  linkedin_url: string | null;
+  processing_status: string;
+  batch_id: string;
+}
+
+async function apolloBulkMatch(personIds: string[]): Promise<ApolloLead[]> {
   if (personIds.length === 0) return [];
 
-  const url = 'https://api.apollo.io/api/v1/people/bulk_match';
-
   const body = {
-    details: personIds.map(id => ({ id }))
+    details: personIds.map((id) => ({ id })),
   };
 
-  const response = await fetch(url, {
+  const response = await fetch(API_ENDPOINTS.APOLLO.BULK_MATCH, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Cache-Control': 'no-cache',
-      'X-Api-Key': APOLLO_API_KEY
+      'X-Api-Key': APOLLO_API_KEY,
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
@@ -120,7 +141,7 @@ async function apolloBulkMatch(personIds: string[]): Promise<any[]> {
     title: match.title ?? '',
     linkedin_url: match.linkedin_url,
     processing_status: 'apollo_matched',
-    batch_id: BATCH_ID
+    batch_id: BATCH_ID,
   }));
 }
 
@@ -130,8 +151,8 @@ async function main() {
   console.log(`\n🚀 Apollo Service Starting`);
   console.log(`   Target: ${TARGET_COUNT} leads`);
   console.log(`   Titles: ${PERSON_TITLES.join(', ')}`);
-  console.log(`   Person locations: ${PERSON_LOCATIONS.join(', ')}`);
-  console.log(`   Company HQ: ${ORGANIZATION_LOCATIONS.join(', ')} | Employees: ${ORGANIZATION_NUM_EMPLOYEES_RANGES.join(', ')}`);
+  console.log(`   Person locations: ${APOLLO_ICP_DEFAULTS.PERSON_LOCATIONS.join(', ')}`);
+  console.log(`   Company HQ: ${APOLLO_ICP_DEFAULTS.ORGANIZATION_LOCATIONS.join(', ')} | Employees: ${APOLLO_ICP_DEFAULTS.ORGANIZATION_NUM_EMPLOYEES_RANGES.join(', ')}`);
   if (ORGANIZATION_INDUSTRY_TAG_IDS.length > 0) {
     console.log(`   Industries: ${ORGANIZATION_INDUSTRY_TAG_IDS.length} tag(s)`);
   }
@@ -143,18 +164,17 @@ async function main() {
     process.exit(1);
   }
 
-  // Create pipeline run
   const runId = await createPipelineRun(db, {
     run_type: 'apollo_collection',
     target_count: TARGET_COUNT,
     triggered_by: 'manual',
     icp_filters: {
       person_titles: PERSON_TITLES,
-      person_locations: PERSON_LOCATIONS,
-      organization_locations: ORGANIZATION_LOCATIONS,
-      organization_num_employees_ranges: ORGANIZATION_NUM_EMPLOYEES_RANGES,
-      organization_industry_tag_ids: ORGANIZATION_INDUSTRY_TAG_IDS
-    }
+      person_locations: APOLLO_ICP_DEFAULTS.PERSON_LOCATIONS,
+      organization_locations: APOLLO_ICP_DEFAULTS.ORGANIZATION_LOCATIONS,
+      organization_num_employees_ranges: APOLLO_ICP_DEFAULTS.ORGANIZATION_NUM_EMPLOYEES_RANGES,
+      organization_industry_tag_ids: ORGANIZATION_INDUSTRY_TAG_IDS,
+    },
   });
 
   console.log(`📊 Pipeline run created: ${runId}\n`);
@@ -200,7 +220,7 @@ async function main() {
 
         if (error.message.includes('429')) {
           console.log('   ⏸️  Rate limit hit, pausing 60 seconds...\n');
-          await new Promise(resolve => setTimeout(resolve, 60000));
+          await sleep(RATE_LIMITS.APOLLO_RATE_LIMIT_PAUSE_MS);
           continue;
         } else {
           break;
@@ -218,10 +238,9 @@ async function main() {
         break;
       }
 
-      // Step 2: Bulk match in batches of 10 (stop early when we have enough)
-      const matchBatchSize = 10;
+      const matchBatchSize = RATE_LIMITS.APOLLO_MATCH_BATCH_SIZE;
       const neededForTarget = TARGET_COUNT - totalCollected;
-      let pageLeads: any[] = [];
+      let pageLeads: ApolloLead[] = [];
 
       for (let i = 0; i < searchResult.person_ids.length; i += matchBatchSize) {
         if (pageLeads.length >= neededForTarget) break;
@@ -266,25 +285,17 @@ async function main() {
 
           if (error.message.includes('429')) {
             console.log('      ⏸️  Rate limit hit, pausing 60 seconds...\n');
-            await new Promise(resolve => setTimeout(resolve, 60000));
-            i -= matchBatchSize; // Retry this batch
+            await sleep(RATE_LIMITS.APOLLO_RATE_LIMIT_PAUSE_MS);
+            i -= matchBatchSize;
             continue;
           }
         }
 
-        // Small delay between match batches
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await sleep(RATE_LIMITS.APOLLO_DELAY_BETWEEN_BATCHES_MS);
       }
 
-      // Step 3: Dedupe by email, skip existing, save only NEW leads
       if (pageLeads.length > 0) {
-        const seen = new Set<string>();
-        const deduped = pageLeads.filter((l) => {
-          const e = (l.email || '').trim().toLowerCase();
-          if (!e || seen.has(e)) return false;
-          seen.add(e);
-          return true;
-        });
+        const deduped = dedupeByEmail(pageLeads);
         const dupCount = pageLeads.length - deduped.length;
         totalSkippedDuplicate += dupCount;
         if (dupCount > 0) {
@@ -297,7 +308,9 @@ async function main() {
         totalCollected += result.inserted;
         totalSkippedExisting += result.skippedExisting;
 
-        console.log(`   💾 Inserted ${result.inserted} new | Skipped ${result.skippedExisting} existing (total new: ${totalCollected}/${TARGET_COUNT})`);
+        console.log(
+          `   💾 Inserted ${result.inserted} new | Skipped ${result.skippedExisting} existing (total new: ${totalCollected}/${TARGET_COUNT})`
+        );
       }
 
       await updateServiceExecution(db, execSearchId, {
@@ -317,8 +330,7 @@ async function main() {
 
       currentPage++;
 
-      // Delay between pages
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await sleep(RATE_LIMITS.APOLLO_DELAY_BETWEEN_PAGES_MS);
     }
 
     // Update pipeline run

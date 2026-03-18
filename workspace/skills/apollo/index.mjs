@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// lib/supabase-pipeline.ts
+// lib/db/connection.ts
 import { Pool } from "pg";
 var pool = null;
 function getDb() {
@@ -15,6 +15,8 @@ function getDb() {
   }
   return pool;
 }
+
+// lib/db/pipeline-runs.ts
 async function createPipelineRun(client, run) {
   const result = await client.query(
     `INSERT INTO pipeline_runs 
@@ -128,6 +130,8 @@ async function updateServiceExecution(client, execId, updates) {
     values
   );
 }
+
+// lib/db/leads.ts
 async function getExistingEmails(client, emails) {
   if (emails.length === 0) return /* @__PURE__ */ new Set();
   const valid = emails.filter((e) => e && typeof e === "string").map((e) => e.trim().toLowerCase());
@@ -185,37 +189,145 @@ async function insertNewLeads(client, leads, options) {
   return { inserted, skippedExisting, skippedDuplicate: 0 };
 }
 
-// skills/apollo/index.ts
-var PERSON_LOCATIONS = ["United States", "Canada"];
-var ORGANIZATION_LOCATIONS = ["United States", "Canada"];
-var ORGANIZATION_NUM_EMPLOYEES_RANGES = ["11,20", "21,50"];
-var ORGANIZATION_INDUSTRY_TAG_IDS = ["5567cd4e7369643b70010000", "5567cd467369644d39040000", "5567ced173696450cb580000"];
-var CONTACT_EMAIL_STATUS = ["verified"];
-var TARGET_COUNT = parseInt(process.env.TARGET_COUNT || "5", 10);
-var PERSON_TITLES = process.env.PERSON_TITLES ? JSON.parse(process.env.PERSON_TITLES) : ["vp marketing", "head of marketing", "vp sales", "director of marketing", "director of sales"];
-var ORGANIZATION_INDUSTRY_TAG_IDS_FINAL = process.env.ORGANIZATION_INDUSTRY_TAG_IDS ? JSON.parse(process.env.ORGANIZATION_INDUSTRY_TAG_IDS) : ORGANIZATION_INDUSTRY_TAG_IDS;
-var APOLLO_API_KEY = process.env.APOLLO_API_KEY;
-var BATCH_ID = process.env.BATCH_ID || `apollo-${Date.now()}`;
-if (!APOLLO_API_KEY) {
-  console.error("\u274C APOLLO_API_KEY not found in env");
-  process.exit(1);
+// lib/utils.ts
+var sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+function parseJsonSafe(text, fallback) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return fallback;
+  }
 }
+function checkRequiredEnv(keys) {
+  const missing = keys.filter((key) => !process.env[key]);
+  return { valid: missing.length === 0, missing };
+}
+function validateRequiredEnv(keys) {
+  const { valid, missing } = checkRequiredEnv(keys);
+  if (!valid) {
+    console.error(`\u274C Missing required environment variables: ${missing.join(", ")}`);
+    process.exit(1);
+  }
+}
+function normalizeEmail(email) {
+  return (email || "").trim().toLowerCase();
+}
+function parseIntSafe(value, fallback) {
+  if (!value) return fallback;
+  const parsed = parseInt(value, 10);
+  return isNaN(parsed) ? fallback : parsed;
+}
+function dedupeByKey(items, keyFn) {
+  const seen = /* @__PURE__ */ new Set();
+  return items.filter((item) => {
+    const key = keyFn(item);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+function dedupeByEmail(items) {
+  return dedupeByKey(items, (item) => normalizeEmail(item.email || ""));
+}
+
+// lib/constants.ts
+var CUSTOMER_REPLY_CATEGORIES = ["hot", "soft", "objection", "negative"];
+var NON_REPLY_CATEGORIES = ["out_of_office", "auto_reply", "not_a_reply"];
+var REPLY_CATEGORIES = [
+  ...CUSTOMER_REPLY_CATEGORIES,
+  ...NON_REPLY_CATEGORIES
+];
+var RATE_LIMITS = {
+  INSTANTLY_BULK_ADD_MAX: 1e3,
+  INSTANTLY_DELAY_MS: 500,
+  APOLLO_MATCH_BATCH_SIZE: 10,
+  APOLLO_DELAY_BETWEEN_PAGES_MS: 1e3,
+  APOLLO_DELAY_BETWEEN_BATCHES_MS: 500,
+  APOLLO_RATE_LIMIT_PAUSE_MS: 6e4,
+  BOUNCER_BATCH_SIZE_MAX: 1e3,
+  BOUNCER_POLL_INTERVAL_MS: 5e3,
+  BOUNCER_MAX_WAIT_MS: 3e5,
+  BOUNCER_DELAY_BETWEEN_BATCHES_MS: 1e3
+};
+var DEFAULTS = {
+  TARGET_COUNT: 5,
+  LOAD_LIMIT: 100,
+  BOUNCER_BATCH_SIZE: 1e3,
+  FETCH_LIMIT: 100
+};
+var SLACK_CHANNELS = {
+  REPORT: process.env.SLACK_REPORT_CHANNEL || "",
+  ALERT: process.env.SLACK_ALERT_CHANNEL || ""
+};
+var API_ENDPOINTS = {
+  APOLLO: {
+    SEARCH: "https://api.apollo.io/api/v1/mixed_people/api_search",
+    BULK_MATCH: "https://api.apollo.io/api/v1/people/bulk_match"
+  },
+  BOUNCER: {
+    SUBMIT_BATCH: "https://api.usebouncer.com/v1.1/email/verify/batch",
+    GET_STATUS: (batchId) => `https://api.usebouncer.com/v1.1/email/verify/batch/${batchId}`,
+    DOWNLOAD: (batchId) => `https://api.usebouncer.com/v1.1/email/verify/batch/${batchId}/download?download=all`
+  },
+  INSTANTLY: {
+    ADD_LEADS: "https://api.instantly.ai/api/v2/leads/add",
+    EMAILS: "https://api.instantly.ai/api/v2/emails",
+    UNREAD_COUNT: (campaignId) => `https://api.instantly.ai/api/v2/emails/unread/count?campaign_id=${campaignId}`,
+    REPLY: "https://api.instantly.ai/api/v2/emails/reply",
+    ANALYTICS_DAILY: "https://api.instantly.ai/api/v2/campaigns/analytics/daily"
+  },
+  OPENAI: {
+    CHAT_COMPLETIONS: "https://api.openai.com/v1/chat/completions"
+  },
+  SLACK: {
+    POST_MESSAGE: "https://slack.com/api/chat.postMessage"
+  }
+};
+var APOLLO_ICP_DEFAULTS = {
+  PERSON_LOCATIONS: ["United States", "Canada"],
+  ORGANIZATION_LOCATIONS: ["United States", "Canada"],
+  ORGANIZATION_NUM_EMPLOYEES_RANGES: ["11,20", "21,50"],
+  ORGANIZATION_INDUSTRY_TAG_IDS: [
+    "5567cd4e7369643b70010000",
+    // Computer Software
+    "5567cd467369644d39040000",
+    // Marketing & Advertising
+    "5567ced173696450cb580000"
+    // Retail
+  ],
+  CONTACT_EMAIL_STATUS: ["verified"],
+  PERSON_TITLES: [
+    "vp marketing",
+    "head of marketing",
+    "vp sales",
+    "director of marketing",
+    "director of sales"
+  ]
+};
+var CLASSIFICATION_MODEL = process.env.REPLY_CLASSIFICATION_MODEL || "gpt-4o";
+
+// skills/apollo/index.ts
+validateRequiredEnv(["APOLLO_API_KEY", "SUPABASE_DB_URL"]);
+var APOLLO_API_KEY = process.env.APOLLO_API_KEY;
+var TARGET_COUNT = parseIntSafe(process.env.TARGET_COUNT, DEFAULTS.TARGET_COUNT);
+var BATCH_ID = process.env.BATCH_ID || `apollo-${Date.now()}`;
+var PERSON_TITLES = process.env.PERSON_TITLES ? parseJsonSafe(process.env.PERSON_TITLES, APOLLO_ICP_DEFAULTS.PERSON_TITLES) : APOLLO_ICP_DEFAULTS.PERSON_TITLES;
+var ORGANIZATION_INDUSTRY_TAG_IDS = process.env.ORGANIZATION_INDUSTRY_TAG_IDS ? parseJsonSafe(process.env.ORGANIZATION_INDUSTRY_TAG_IDS, APOLLO_ICP_DEFAULTS.ORGANIZATION_INDUSTRY_TAG_IDS) : APOLLO_ICP_DEFAULTS.ORGANIZATION_INDUSTRY_TAG_IDS;
 async function apolloSearchPeople(page = 1, perPage = 100) {
   var _a, _b;
-  const url = "https://api.apollo.io/api/v1/mixed_people/api_search";
   const body = {
     page,
     per_page: perPage,
     person_titles: PERSON_TITLES,
-    person_locations: PERSON_LOCATIONS,
-    organization_locations: ORGANIZATION_LOCATIONS,
-    organization_num_employees_ranges: ORGANIZATION_NUM_EMPLOYEES_RANGES,
-    contact_email_status_v2: CONTACT_EMAIL_STATUS
+    person_locations: APOLLO_ICP_DEFAULTS.PERSON_LOCATIONS,
+    organization_locations: APOLLO_ICP_DEFAULTS.ORGANIZATION_LOCATIONS,
+    organization_num_employees_ranges: APOLLO_ICP_DEFAULTS.ORGANIZATION_NUM_EMPLOYEES_RANGES,
+    contact_email_status_v2: APOLLO_ICP_DEFAULTS.CONTACT_EMAIL_STATUS
   };
-  if (ORGANIZATION_INDUSTRY_TAG_IDS_FINAL.length > 0) {
-    body.organization_industry_tag_ids = ORGANIZATION_INDUSTRY_TAG_IDS_FINAL;
+  if (ORGANIZATION_INDUSTRY_TAG_IDS.length > 0) {
+    body.organization_industry_tag_ids = ORGANIZATION_INDUSTRY_TAG_IDS;
   }
-  const response = await fetch(url, {
+  const response = await fetch(API_ENDPOINTS.APOLLO.SEARCH, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -228,12 +340,8 @@ async function apolloSearchPeople(page = 1, perPage = 100) {
     const errBody = await response.text();
     let errMsg = `Apollo search failed: ${response.status} ${response.statusText}`;
     if (errBody) {
-      try {
-        const parsed = JSON.parse(errBody);
-        errMsg += ` \u2014 ${JSON.stringify(parsed)}`;
-      } catch {
-        errMsg += ` \u2014 ${errBody.slice(0, 200)}`;
-      }
+      const parsed = parseJsonSafe(errBody, null);
+      errMsg += parsed ? ` \u2014 ${JSON.stringify(parsed)}` : ` \u2014 ${errBody.slice(0, 200)}`;
     }
     throw new Error(errMsg);
   }
@@ -246,11 +354,10 @@ async function apolloSearchPeople(page = 1, perPage = 100) {
 }
 async function apolloBulkMatch(personIds) {
   if (personIds.length === 0) return [];
-  const url = "https://api.apollo.io/api/v1/people/bulk_match";
   const body = {
     details: personIds.map((id) => ({ id }))
   };
-  const response = await fetch(url, {
+  const response = await fetch(API_ENDPOINTS.APOLLO.BULK_MATCH, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -283,8 +390,8 @@ async function main() {
 \u{1F680} Apollo Service Starting`);
   console.log(`   Target: ${TARGET_COUNT} leads`);
   console.log(`   Titles: ${PERSON_TITLES.join(", ")}`);
-  console.log(`   Person locations: ${PERSON_LOCATIONS.join(", ")}`);
-  console.log(`   Company HQ: ${ORGANIZATION_LOCATIONS.join(", ")} | Employees: ${ORGANIZATION_NUM_EMPLOYEES_RANGES.join(", ")}`);
+  console.log(`   Person locations: ${APOLLO_ICP_DEFAULTS.PERSON_LOCATIONS.join(", ")}`);
+  console.log(`   Company HQ: ${APOLLO_ICP_DEFAULTS.ORGANIZATION_LOCATIONS.join(", ")} | Employees: ${APOLLO_ICP_DEFAULTS.ORGANIZATION_NUM_EMPLOYEES_RANGES.join(", ")}`);
   if (ORGANIZATION_INDUSTRY_TAG_IDS.length > 0) {
     console.log(`   Industries: ${ORGANIZATION_INDUSTRY_TAG_IDS.length} tag(s)`);
   }
@@ -301,9 +408,9 @@ async function main() {
     triggered_by: "manual",
     icp_filters: {
       person_titles: PERSON_TITLES,
-      person_locations: PERSON_LOCATIONS,
-      organization_locations: ORGANIZATION_LOCATIONS,
-      organization_num_employees_ranges: ORGANIZATION_NUM_EMPLOYEES_RANGES,
+      person_locations: APOLLO_ICP_DEFAULTS.PERSON_LOCATIONS,
+      organization_locations: APOLLO_ICP_DEFAULTS.ORGANIZATION_LOCATIONS,
+      organization_num_employees_ranges: APOLLO_ICP_DEFAULTS.ORGANIZATION_NUM_EMPLOYEES_RANGES,
       organization_industry_tag_ids: ORGANIZATION_INDUSTRY_TAG_IDS
     }
   });
@@ -343,7 +450,7 @@ async function main() {
         });
         if (error.message.includes("429")) {
           console.log("   \u23F8\uFE0F  Rate limit hit, pausing 60 seconds...\n");
-          await new Promise((resolve) => setTimeout(resolve, 6e4));
+          await sleep(RATE_LIMITS.APOLLO_RATE_LIMIT_PAUSE_MS);
           continue;
         } else {
           break;
@@ -359,7 +466,7 @@ async function main() {
         });
         break;
       }
-      const matchBatchSize = 10;
+      const matchBatchSize = RATE_LIMITS.APOLLO_MATCH_BATCH_SIZE;
       const neededForTarget = TARGET_COUNT - totalCollected;
       let pageLeads = [];
       for (let i = 0; i < searchResult.person_ids.length; i += matchBatchSize) {
@@ -396,21 +503,15 @@ async function main() {
           });
           if (error.message.includes("429")) {
             console.log("      \u23F8\uFE0F  Rate limit hit, pausing 60 seconds...\n");
-            await new Promise((resolve) => setTimeout(resolve, 6e4));
+            await sleep(RATE_LIMITS.APOLLO_RATE_LIMIT_PAUSE_MS);
             i -= matchBatchSize;
             continue;
           }
         }
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        await sleep(RATE_LIMITS.APOLLO_DELAY_BETWEEN_BATCHES_MS);
       }
       if (pageLeads.length > 0) {
-        const seen = /* @__PURE__ */ new Set();
-        const deduped = pageLeads.filter((l) => {
-          const e = (l.email || "").trim().toLowerCase();
-          if (!e || seen.has(e)) return false;
-          seen.add(e);
-          return true;
-        });
+        const deduped = dedupeByEmail(pageLeads);
         const dupCount = pageLeads.length - deduped.length;
         totalSkippedDuplicate += dupCount;
         if (dupCount > 0) {
@@ -421,7 +522,9 @@ async function main() {
         const result = await insertNewLeads(db, toSave, { batchId: BATCH_ID });
         totalCollected += result.inserted;
         totalSkippedExisting += result.skippedExisting;
-        console.log(`   \u{1F4BE} Inserted ${result.inserted} new | Skipped ${result.skippedExisting} existing (total new: ${totalCollected}/${TARGET_COUNT})`);
+        console.log(
+          `   \u{1F4BE} Inserted ${result.inserted} new | Skipped ${result.skippedExisting} existing (total new: ${totalCollected}/${TARGET_COUNT})`
+        );
       }
       await updateServiceExecution(db, execSearchId, {
         status: "completed",
@@ -437,7 +540,7 @@ async function main() {
         break;
       }
       currentPage++;
-      await new Promise((resolve) => setTimeout(resolve, 1e3));
+      await sleep(RATE_LIMITS.APOLLO_DELAY_BETWEEN_PAGES_MS);
     }
     await updatePipelineRun(db, runId, {
       status: "completed",

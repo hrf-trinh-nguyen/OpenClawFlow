@@ -33,14 +33,17 @@ psql "$SUPABASE_DB_URL" -c "SELECT COUNT(*) FROM leads WHERE processing_status='
 
 **Command:** `Run workflow: build-list`
 
-**Manual short-run command for chat/Slack:** Use this when you want AI to run one safe batch only and avoid timeout:
+**Recommended: Run via shell script (no agent timeout):**
+```bash
+cd ~/.openclaw && ./scripts/run-build-list.sh
+# Or with custom count:
+TARGET_COUNT=50 ./scripts/run-build-list.sh
+```
+
+**Alternative: Run skills directly:**
 ```bash
 cd ~/.openclaw && source .env && TARGET_COUNT=100 node workspace/skills/apollo/index.mjs && node workspace/skills/bouncer/index.mjs
 ```
-Recommended phrasing to AI:
-- `Run one build-list batch`
-- `Run build-list single batch`
-- `Collect one batch only, do not loop to 200`
 
 ---
 
@@ -61,14 +64,17 @@ Recommended phrasing to AI:
 
 **Command:** `Run workflow: load-campaign`
 
-**Manual short-run command for chat/Slack:** Use this when you want AI to load a bounded batch only:
+**Recommended: Run via shell script (no agent timeout):**
+```bash
+cd ~/.openclaw && ./scripts/run-load-campaign.sh
+# Or with custom limit:
+LOAD_LIMIT=50 ./scripts/run-load-campaign.sh
+```
+
+**Alternative: Run skill directly:**
 ```bash
 cd ~/.openclaw && source .env && LOAD_LIMIT=100 MODE=load node workspace/skills/instantly/index.mjs
 ```
-Recommended phrasing to AI:
-- `Run one load-campaign batch`
-- `Load up to 100 verified leads`
-- `Run load-campaign single batch`
 
 ---
 

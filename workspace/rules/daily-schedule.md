@@ -15,17 +15,19 @@ After **every** workflow step completes, post a brief summary to `C0A5S86QH9D` (
 
 - **Workflow:** `build-list`
 - Skills: apollo → bouncer
-- Runs at `0 3-5 * * *` via OpenClaw cron
-- **Daily target: 200 `bouncer_verified` leads.** Each run does a single Apollo batch (`TARGET_COUNT=100`) + one Bouncer pass. Later runs continue progress toward the daily target.
+- **Runs via systemd timer** (`openclaw-build-list.timer`) — NOT via OpenClaw cron agent
+- **Daily target: 200 `bouncer_verified` leads.** Each run does a single Apollo batch (`TARGET_COUNT=100`) + one Bouncer pass.
 - Report completion summary to `C0A5S86QH9D`. Report errors to `C0ALRRHK61X`.
+- **Manual run:** `./scripts/run-build-list.sh` or `TARGET_COUNT=50 ./scripts/run-build-list.sh`
 
 ## 5:15 AM, 5:45 AM PT – Load Campaign
 
 - **Workflow:** `load-campaign`
 - Skill: instantly (MODE=load)
-- Runs at `15,45 5 * * *`
-- Add verified leads from DB to Instantly campaign in bounded batches (`LOAD_LIMIT=100`) so each run stays short and finishes before Instantly starts sending at `6:30 AM PT`
+- **Runs via systemd timer** (`openclaw-load-campaign.timer`) — NOT via OpenClaw cron agent
+- Add verified leads from DB to Instantly campaign in bounded batches (`LOAD_LIMIT=100`)
 - Report completion summary to `C0A5S86QH9D`. Report errors to `C0ALRRHK61X`.
+- **Manual run:** `./scripts/run-load-campaign.sh` or `LOAD_LIMIT=50 ./scripts/run-load-campaign.sh`
 
 ## 9:00 AM – 5:00 PM PT – Sending Window
 

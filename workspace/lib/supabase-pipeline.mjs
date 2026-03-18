@@ -1,4 +1,4 @@
-// lib/supabase-pipeline.ts
+// lib/db/connection.ts
 import { Pool } from "pg";
 var pool = null;
 function getDb() {
@@ -13,6 +13,14 @@ function getDb() {
   }
   return pool;
 }
+function getSupabaseClient() {
+  return getDb();
+}
+function getSupabaseEnv() {
+  return { url: process.env.SUPABASE_DB_URL || "", key: "" };
+}
+
+// lib/db/pipeline-runs.ts
 async function createPipelineRun(client, run) {
   const result = await client.query(
     `INSERT INTO pipeline_runs 
@@ -126,6 +134,8 @@ async function updateServiceExecution(client, execId, updates) {
     values
   );
 }
+
+// lib/db/leads.ts
 async function getExistingEmails(client, emails) {
   if (emails.length === 0) return /* @__PURE__ */ new Set();
   const valid = emails.filter((e) => e && typeof e === "string").map((e) => e.trim().toLowerCase());
@@ -242,6 +252,8 @@ async function getPipelineStats(client) {
   );
   return result.rows;
 }
+
+// lib/db/reports.ts
 async function getMetricsForReport(client, reportDate) {
   var _a;
   const metrics = {
@@ -256,6 +268,9 @@ async function getMetricsForReport(client, reportDate) {
     soft_count: 0,
     objection_count: 0,
     negative_count: 0,
+    out_of_office_count: 0,
+    auto_reply_count: 0,
+    not_a_reply_count: 0,
     deliverable_rate: 0,
     bounce_rate: 0,
     spam_complaint_rate: 0
@@ -318,6 +333,9 @@ async function getMetricsForReport(client, reportDate) {
       else if (row.category === "soft") metrics.soft_count = c;
       else if (row.category === "objection") metrics.objection_count = c;
       else if (row.category === "negative") metrics.negative_count = c;
+      else if (row.category === "out_of_office") metrics.out_of_office_count = c;
+      else if (row.category === "auto_reply") metrics.auto_reply_count = c;
+      else if (row.category === "not_a_reply") metrics.not_a_reply_count = c;
     }
   } else {
     const classRes = await client.query(
@@ -455,6 +473,9 @@ async function getDailyReportsByMonth(client, year, month) {
     soft_count: Number(r.soft_count) || 0,
     objection_count: Number(r.objection_count) || 0,
     negative_count: Number(r.negative_count) || 0,
+    out_of_office_count: 0,
+    auto_reply_count: 0,
+    not_a_reply_count: 0,
     deliverable_rate: Number(r.deliverable_rate) || 0,
     bounce_rate: Number(r.bounce_rate) || 0,
     spam_complaint_rate: Number(r.spam_complaint_rate) || 0,
@@ -462,12 +483,6 @@ async function getDailyReportsByMonth(client, year, month) {
     opened: Number(r.opened) || 0,
     replies: Number(r.replies) || 0
   }));
-}
-function getSupabaseClient() {
-  return getDb();
-}
-function getSupabaseEnv() {
-  return { url: process.env.SUPABASE_DB_URL || "", key: "" };
 }
 export {
   batchUpdateLeadStatus,

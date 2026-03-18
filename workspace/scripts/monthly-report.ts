@@ -41,11 +41,32 @@ async function main() {
       soft_count: acc.soft_count + (r.soft_count || 0),
       objection_count: acc.objection_count + (r.objection_count || 0),
       negative_count: acc.negative_count + (r.negative_count || 0),
+      out_of_office_count: acc.out_of_office_count + ((r as any).out_of_office_count || 0),
+      auto_reply_count: acc.auto_reply_count + ((r as any).auto_reply_count || 0),
+      not_a_reply_count: acc.not_a_reply_count + ((r as any).not_a_reply_count || 0),
       sent: acc.sent + ((r as any).sent || 0),
       opened: acc.opened + ((r as any).opened || 0),
       replies: acc.replies + ((r as any).replies || 0),
     }),
-    { person_ids_count: 0, leads_pulled: 0, leads_validated: 0, leads_removed: 0, pushed_ok: 0, pushed_failed: 0, replies_fetched: 0, hot_count: 0, soft_count: 0, objection_count: 0, negative_count: 0, sent: 0, opened: 0, replies: 0 }
+    {
+      person_ids_count: 0,
+      leads_pulled: 0,
+      leads_validated: 0,
+      leads_removed: 0,
+      pushed_ok: 0,
+      pushed_failed: 0,
+      replies_fetched: 0,
+      hot_count: 0,
+      soft_count: 0,
+      objection_count: 0,
+      negative_count: 0,
+      out_of_office_count: 0,
+      auto_reply_count: 0,
+      not_a_reply_count: 0,
+      sent: 0,
+      opened: 0,
+      replies: 0,
+    }
   );
 
   const dr = totals.leads_pulled > 0 ? Math.round((totals.leads_validated / totals.leads_pulled) * 1000) / 10 : 0;
@@ -72,8 +93,13 @@ async function main() {
     '',
     '*Reply Classification (LLM, total)*',
     `• Fetched: ${totals.replies_fetched}`,
-    `• Hot: ${totals.hot_count}  |  Soft: ${totals.soft_count}  |  Objection: ${totals.objection_count}  |  Negative: ${totals.negative_count} (rate ≈ ${nr.toFixed(2)}%)`,
-  ].join('\n');
+    `• Customer: Hot ${totals.hot_count}  |  Soft ${totals.soft_count}  |  Objection ${totals.objection_count}  |  Negative ${totals.negative_count} (rate ≈ ${nr.toFixed(2)}%)`,
+    totals.out_of_office_count + totals.auto_reply_count + totals.not_a_reply_count > 0
+      ? `• Not customer: Out of office ${totals.out_of_office_count}  |  Auto-reply ${totals.auto_reply_count}  |  Not a reply ${totals.not_a_reply_count}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
 
   console.log('\n' + text + '\n');
 }

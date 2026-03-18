@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// lib/supabase-pipeline.ts
+// lib/db/connection.ts
 import { Pool } from "pg";
 var pool = null;
 function getDb() {
@@ -15,6 +15,8 @@ function getDb() {
   }
   return pool;
 }
+
+// lib/db/pipeline-runs.ts
 async function createPipelineRun(client, run) {
   const result = await client.query(
     `INSERT INTO pipeline_runs 
@@ -128,6 +130,8 @@ async function updateServiceExecution(client, execId, updates) {
     values
   );
 }
+
+// lib/db/leads.ts
 async function getLeadsByStatus(client, status, limit = 100) {
   const result = await client.query(
     `SELECT id, apollo_person_id, first_name, last_name, email, company_name, 
@@ -152,17 +156,109 @@ async function batchUpdateLeadStatus(client, leadIds, newStatus, errorMessage) {
   return result.rowCount || 0;
 }
 
-// skills/bouncer/index.ts
-var BOUNCER_API_KEY = process.env.BOUNCER_API_KEY;
-var BOUNCER_BATCH_SIZE = Math.min(1e3, Math.max(1, parseInt(process.env.BOUNCER_BATCH_SIZE || "1000", 10)));
-if (!BOUNCER_API_KEY) {
-  console.error("\u274C BOUNCER_API_KEY not found in env");
-  process.exit(1);
+// lib/utils.ts
+var sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+function checkRequiredEnv(keys) {
+  const missing = keys.filter((key) => !process.env[key]);
+  return { valid: missing.length === 0, missing };
 }
+function validateRequiredEnv(keys) {
+  const { valid, missing } = checkRequiredEnv(keys);
+  if (!valid) {
+    console.error(`\u274C Missing required environment variables: ${missing.join(", ")}`);
+    process.exit(1);
+  }
+}
+function normalizeEmail(email) {
+  return (email || "").trim().toLowerCase();
+}
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+function parseIntSafe(value, fallback) {
+  if (!value) return fallback;
+  const parsed = parseInt(value, 10);
+  return isNaN(parsed) ? fallback : parsed;
+}
+function dedupeByKey(items, keyFn) {
+  const seen = /* @__PURE__ */ new Set();
+  return items.filter((item) => {
+    const key = keyFn(item);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+function dedupeByEmail(items) {
+  return dedupeByKey(items, (item) => normalizeEmail(item.email || ""));
+}
+
+// lib/constants.ts
+var CUSTOMER_REPLY_CATEGORIES = ["hot", "soft", "objection", "negative"];
+var NON_REPLY_CATEGORIES = ["out_of_office", "auto_reply", "not_a_reply"];
+var REPLY_CATEGORIES = [
+  ...CUSTOMER_REPLY_CATEGORIES,
+  ...NON_REPLY_CATEGORIES
+];
+var RATE_LIMITS = {
+  INSTANTLY_BULK_ADD_MAX: 1e3,
+  INSTANTLY_DELAY_MS: 500,
+  APOLLO_MATCH_BATCH_SIZE: 10,
+  APOLLO_DELAY_BETWEEN_PAGES_MS: 1e3,
+  APOLLO_DELAY_BETWEEN_BATCHES_MS: 500,
+  APOLLO_RATE_LIMIT_PAUSE_MS: 6e4,
+  BOUNCER_BATCH_SIZE_MAX: 1e3,
+  BOUNCER_POLL_INTERVAL_MS: 5e3,
+  BOUNCER_MAX_WAIT_MS: 3e5,
+  BOUNCER_DELAY_BETWEEN_BATCHES_MS: 1e3
+};
+var DEFAULTS = {
+  TARGET_COUNT: 5,
+  LOAD_LIMIT: 100,
+  BOUNCER_BATCH_SIZE: 1e3,
+  FETCH_LIMIT: 100
+};
+var SLACK_CHANNELS = {
+  REPORT: process.env.SLACK_REPORT_CHANNEL || "",
+  ALERT: process.env.SLACK_ALERT_CHANNEL || ""
+};
+var API_ENDPOINTS = {
+  APOLLO: {
+    SEARCH: "https://api.apollo.io/api/v1/mixed_people/api_search",
+    BULK_MATCH: "https://api.apollo.io/api/v1/people/bulk_match"
+  },
+  BOUNCER: {
+    SUBMIT_BATCH: "https://api.usebouncer.com/v1.1/email/verify/batch",
+    GET_STATUS: (batchId) => `https://api.usebouncer.com/v1.1/email/verify/batch/${batchId}`,
+    DOWNLOAD: (batchId) => `https://api.usebouncer.com/v1.1/email/verify/batch/${batchId}/download?download=all`
+  },
+  INSTANTLY: {
+    ADD_LEADS: "https://api.instantly.ai/api/v2/leads/add",
+    EMAILS: "https://api.instantly.ai/api/v2/emails",
+    UNREAD_COUNT: (campaignId) => `https://api.instantly.ai/api/v2/emails/unread/count?campaign_id=${campaignId}`,
+    REPLY: "https://api.instantly.ai/api/v2/emails/reply",
+    ANALYTICS_DAILY: "https://api.instantly.ai/api/v2/campaigns/analytics/daily"
+  },
+  OPENAI: {
+    CHAT_COMPLETIONS: "https://api.openai.com/v1/chat/completions"
+  },
+  SLACK: {
+    POST_MESSAGE: "https://slack.com/api/chat.postMessage"
+  }
+};
+var CLASSIFICATION_MODEL = process.env.REPLY_CLASSIFICATION_MODEL || "gpt-4o";
+
+// skills/bouncer/index.ts
+validateRequiredEnv(["BOUNCER_API_KEY", "SUPABASE_DB_URL"]);
+var BOUNCER_API_KEY = process.env.BOUNCER_API_KEY;
+var BOUNCER_BATCH_SIZE = clamp(
+  parseIntSafe(process.env.BOUNCER_BATCH_SIZE, DEFAULTS.BOUNCER_BATCH_SIZE),
+  1,
+  RATE_LIMITS.BOUNCER_BATCH_SIZE_MAX
+);
 async function bouncerSubmitBatch(emails) {
-  const url = "https://api.usebouncer.com/v1.1/email/verify/batch";
   const body = emails.map((email) => ({ email }));
-  const response = await fetch(url, {
+  const response = await fetch(API_ENDPOINTS.BOUNCER.SUBMIT_BATCH, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -181,8 +277,7 @@ async function bouncerSubmitBatch(emails) {
   return data.batchId;
 }
 async function bouncerGetBatchStatus(batchId) {
-  const url = `https://api.usebouncer.com/v1.1/email/verify/batch/${batchId}`;
-  const response = await fetch(url, {
+  const response = await fetch(API_ENDPOINTS.BOUNCER.GET_STATUS(batchId), {
     headers: { "x-api-key": BOUNCER_API_KEY }
   });
   if (!response.ok) {
@@ -193,8 +288,7 @@ async function bouncerGetBatchStatus(batchId) {
   return { status: data.status || "unknown" };
 }
 async function bouncerDownloadResults(batchId) {
-  const url = `https://api.usebouncer.com/v1.1/email/verify/batch/${batchId}/download?download=all`;
-  const response = await fetch(url, {
+  const response = await fetch(API_ENDPOINTS.BOUNCER.DOWNLOAD(batchId), {
     headers: { "x-api-key": BOUNCER_API_KEY }
   });
   if (response.status === 405) {
@@ -207,9 +301,9 @@ async function bouncerDownloadResults(batchId) {
   const data = await response.json();
   return Array.isArray(data) ? data : [];
 }
-async function bouncerPollBatch(batchId, maxWaitMs = 3e5) {
+async function bouncerPollBatch(batchId, maxWaitMs = RATE_LIMITS.BOUNCER_MAX_WAIT_MS) {
   const startTime = Date.now();
-  const pollInterval = 5e3;
+  const pollInterval = RATE_LIMITS.BOUNCER_POLL_INTERVAL_MS;
   console.log(`   \u23F3 Polling batch ${batchId}...`);
   while (Date.now() - startTime < maxWaitMs) {
     const { status } = await bouncerGetBatchStatus(batchId);
@@ -221,13 +315,15 @@ async function bouncerPollBatch(batchId, maxWaitMs = 3e5) {
       throw new Error("Bouncer batch failed");
     }
     console.log(`      Status: ${status}, waiting ${pollInterval / 1e3}s...`);
-    await new Promise((resolve) => setTimeout(resolve, pollInterval));
+    await sleep(pollInterval);
   }
   throw new Error(`Bouncer batch timed out after ${maxWaitMs / 1e3}s`);
 }
 async function main() {
-  console.log(`\\n\u{1F50D} Bouncer Service Starting`);
-  console.log(`   Batch size: ${BOUNCER_BATCH_SIZE}\\n`);
+  console.log(`
+\u{1F50D} Bouncer Service Starting`);
+  console.log(`   Batch size: ${BOUNCER_BATCH_SIZE}
+`);
   const db = getDb();
   if (!db) {
     console.error("\u274C Failed to connect to database");
@@ -235,11 +331,12 @@ async function main() {
   }
   const pendingLeads = await getLeadsByStatus(db, "apollo_matched", 1e4);
   if (pendingLeads.length === 0) {
-    console.log("\u2139\uFE0F  No leads pending verification (status=apollo_matched)\\n");
+    console.log("\u2139\uFE0F  No leads pending verification (status=apollo_matched)\n");
     await db.end();
     return;
   }
-  console.log(`\u{1F4CA} Found ${pendingLeads.length} leads pending verification\\n`);
+  console.log(`\u{1F4CA} Found ${pendingLeads.length} leads pending verification
+`);
   const runId = await createPipelineRun(db, {
     run_type: "bouncer_verify",
     triggered_by: "manual"
@@ -263,20 +360,14 @@ async function main() {
         batch_size: BOUNCER_BATCH_SIZE
       });
       try {
-        const seen = /* @__PURE__ */ new Set();
-        const uniqueBatch = batch.filter((l) => {
-          const e = (l.email || "").trim().toLowerCase();
-          if (!e || seen.has(e)) return false;
-          seen.add(e);
-          return true;
-        });
+        const uniqueBatch = dedupeByEmail(batch);
         const dupInBatch = batch.length - uniqueBatch.length;
         if (dupInBatch > 0) {
           console.log(`   \u26A0\uFE0F  Skipped ${dupInBatch} duplicate email(s) in batch`);
         }
-        const emails = uniqueBatch.map((l) => l.email).filter((e) => e);
+        const emails = uniqueBatch.map((l) => l.email).filter((e) => !!e);
         if (emails.length === 0) {
-          console.log("   \u26A0\uFE0F  No valid emails in batch, skipping\\n");
+          console.log("   \u26A0\uFE0F  No valid emails in batch, skipping\n");
           await updateServiceExecution(db, execId, {
             status: "completed",
             completed_at: /* @__PURE__ */ new Date(),
@@ -318,8 +409,13 @@ async function main() {
           );
         }
         totalProcessed += uniqueBatch.length;
-        console.log(`   \u2705 Batch ${batchNum} complete: ${deliverableIds.length} deliverable, ${failedIds.length} invalid`);
-        console.log(`   \u{1F4CA} Progress: ${totalProcessed}/${pendingLeads.length} (${Math.round(totalProcessed / pendingLeads.length * 100)}%)\\n`);
+        console.log(
+          `   \u2705 Batch ${batchNum} complete: ${deliverableIds.length} deliverable, ${failedIds.length} invalid`
+        );
+        console.log(
+          `   \u{1F4CA} Progress: ${totalProcessed}/${pendingLeads.length} (${Math.round(totalProcessed / pendingLeads.length * 100)}%)
+`
+        );
         await updateServiceExecution(db, execId, {
           status: "completed",
           completed_at: /* @__PURE__ */ new Date(),
@@ -329,7 +425,8 @@ async function main() {
         });
       } catch (error) {
         apiErrors++;
-        console.error(`   \u274C Batch ${batchNum} failed: ${error.message}\\n`);
+        console.error(`   \u274C Batch ${batchNum} failed: ${error.message}
+`);
         await updateServiceExecution(db, execId, {
           status: "failed",
           completed_at: /* @__PURE__ */ new Date(),
@@ -342,11 +439,11 @@ async function main() {
           totalInvalid += failedIds.length;
         }
         if (error.message.includes("402")) {
-          console.log("   \u26A0\uFE0F  Insufficient credits, stopping\\n");
+          console.log("   \u26A0\uFE0F  Insufficient credits, stopping\n");
           break;
         }
       }
-      await new Promise((resolve) => setTimeout(resolve, 1e3));
+      await sleep(RATE_LIMITS.BOUNCER_DELAY_BETWEEN_BATCHES_MS);
     }
     await updatePipelineRun(db, runId, {
       status: "completed",
@@ -356,14 +453,18 @@ async function main() {
       leads_failed: totalInvalid
     });
     const deliverableRate = totalProcessed > 0 ? (totalDeliverable / totalProcessed * 100).toFixed(1) : "0.0";
-    console.log(`\\n\u2705 Bouncer Service Complete`);
+    console.log(`
+\u2705 Bouncer Service Complete`);
     console.log(`   Total processed: ${totalProcessed} leads`);
     console.log(`   Deliverable: ${totalDeliverable} (${deliverableRate}%)`);
     console.log(`   Invalid: ${totalInvalid}`);
     console.log(`   API calls made: ${apiCallsMade}`);
-    console.log(`   API errors: ${apiErrors}\\n`);
+    console.log(`   API errors: ${apiErrors}
+`);
   } catch (error) {
-    console.error(`\\n\u274C Bouncer Service Failed: ${error.message}\\n`);
+    console.error(`
+\u274C Bouncer Service Failed: ${error.message}
+`);
     await updatePipelineRun(db, runId, {
       status: "failed",
       completed_at: /* @__PURE__ */ new Date(),

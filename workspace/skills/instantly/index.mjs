@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// lib/supabase-pipeline.ts
+// lib/db/connection.ts
 import { Pool } from "pg";
 var pool = null;
 function getDb() {
@@ -15,6 +15,8 @@ function getDb() {
   }
   return pool;
 }
+
+// lib/db/pipeline-runs.ts
 async function createPipelineRun(client, run) {
   const result = await client.query(
     `INSERT INTO pipeline_runs 
@@ -128,6 +130,8 @@ async function updateServiceExecution(client, execId, updates) {
     values
   );
 }
+
+// lib/db/leads.ts
 async function getLeadsReadyForCampaign(client, limit = 1e4) {
   const result = await client.query(
     `SELECT id, apollo_person_id, first_name, last_name, email, company_name,
@@ -153,31 +157,242 @@ async function batchUpdateLeadStatus(client, leadIds, newStatus, errorMessage) {
   return result.rowCount || 0;
 }
 
+// lib/utils.ts
+var sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+function parseJsonSafe(text, fallback) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return fallback;
+  }
+}
+function checkRequiredEnv(keys) {
+  const missing = keys.filter((key) => !process.env[key]);
+  return { valid: missing.length === 0, missing };
+}
+function validateRequiredEnv(keys) {
+  const { valid, missing } = checkRequiredEnv(keys);
+  if (!valid) {
+    console.error(`\u274C Missing required environment variables: ${missing.join(", ")}`);
+    process.exit(1);
+  }
+}
+function parseIntSafe(value, fallback) {
+  if (!value) return fallback;
+  const parsed = parseInt(value, 10);
+  return isNaN(parsed) ? fallback : parsed;
+}
+function getDateRange(fromEnv, toEnv, singleEnv) {
+  if (fromEnv && toEnv) {
+    const [y1, m1, d1] = fromEnv.split("-").map(Number);
+    const [y2, m2, d2] = toEnv.split("-").map(Number);
+    const minDate = new Date(Date.UTC(y1, (m1 || 1) - 1, d1 || 1));
+    const maxDate = new Date(Date.UTC(y2, (m2 || 1) - 1, d2 || 1));
+    maxDate.setUTCDate(maxDate.getUTCDate() + 1);
+    return { min: minDate.toISOString(), max: maxDate.toISOString() };
+  }
+  if (singleEnv) {
+    const [y, m, d] = singleEnv.split("-").map(Number);
+    const dayStart = new Date(Date.UTC(y, (m || 1) - 1, d || 1));
+    const dayEnd = new Date(dayStart);
+    dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
+    return { min: dayStart.toISOString(), max: dayEnd.toISOString() };
+  }
+  const now = /* @__PURE__ */ new Date();
+  const localStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const localEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  return { min: localStart.toISOString(), max: localEnd.toISOString() };
+}
+
+// lib/constants.ts
+var CUSTOMER_REPLY_CATEGORIES = ["hot", "soft", "objection", "negative"];
+var NON_REPLY_CATEGORIES = ["out_of_office", "auto_reply", "not_a_reply"];
+var REPLY_CATEGORIES = [
+  ...CUSTOMER_REPLY_CATEGORIES,
+  ...NON_REPLY_CATEGORIES
+];
+function isValidReplyCategory(category) {
+  return REPLY_CATEGORIES.includes(category);
+}
+var RATE_LIMITS = {
+  INSTANTLY_BULK_ADD_MAX: 1e3,
+  INSTANTLY_DELAY_MS: 500,
+  APOLLO_MATCH_BATCH_SIZE: 10,
+  APOLLO_DELAY_BETWEEN_PAGES_MS: 1e3,
+  APOLLO_DELAY_BETWEEN_BATCHES_MS: 500,
+  APOLLO_RATE_LIMIT_PAUSE_MS: 6e4,
+  BOUNCER_BATCH_SIZE_MAX: 1e3,
+  BOUNCER_POLL_INTERVAL_MS: 5e3,
+  BOUNCER_MAX_WAIT_MS: 3e5,
+  BOUNCER_DELAY_BETWEEN_BATCHES_MS: 1e3
+};
+var DEFAULTS = {
+  TARGET_COUNT: 5,
+  LOAD_LIMIT: 100,
+  BOUNCER_BATCH_SIZE: 1e3,
+  FETCH_LIMIT: 100
+};
+var SLACK_CHANNELS = {
+  REPORT: process.env.SLACK_REPORT_CHANNEL || "",
+  ALERT: process.env.SLACK_ALERT_CHANNEL || ""
+};
+var API_ENDPOINTS = {
+  APOLLO: {
+    SEARCH: "https://api.apollo.io/api/v1/mixed_people/api_search",
+    BULK_MATCH: "https://api.apollo.io/api/v1/people/bulk_match"
+  },
+  BOUNCER: {
+    SUBMIT_BATCH: "https://api.usebouncer.com/v1.1/email/verify/batch",
+    GET_STATUS: (batchId) => `https://api.usebouncer.com/v1.1/email/verify/batch/${batchId}`,
+    DOWNLOAD: (batchId) => `https://api.usebouncer.com/v1.1/email/verify/batch/${batchId}/download?download=all`
+  },
+  INSTANTLY: {
+    ADD_LEADS: "https://api.instantly.ai/api/v2/leads/add",
+    EMAILS: "https://api.instantly.ai/api/v2/emails",
+    UNREAD_COUNT: (campaignId) => `https://api.instantly.ai/api/v2/emails/unread/count?campaign_id=${campaignId}`,
+    REPLY: "https://api.instantly.ai/api/v2/emails/reply",
+    ANALYTICS_DAILY: "https://api.instantly.ai/api/v2/campaigns/analytics/daily"
+  },
+  OPENAI: {
+    CHAT_COMPLETIONS: "https://api.openai.com/v1/chat/completions"
+  },
+  SLACK: {
+    POST_MESSAGE: "https://slack.com/api/chat.postMessage"
+  }
+};
+var HOT_REPLY_TEMPLATE = {
+  BOOK_NOW_URL: "https://meet.designpickle.com/campaign/ob-demo?ref=outbound",
+  COMPARE_URL: "https://designpickle.com/comparison"
+};
+var CLASSIFICATION_MODEL = process.env.REPLY_CLASSIFICATION_MODEL || "gpt-4o";
+var PROMPTS = {
+  CLASSIFICATION: `You are a strict classifier for outbound sales email replies. Your output must be precise and consistent.
+
+## Step 1 \u2013 Is this a real reply from the prospect?
+- If the message is an automatic reply (out of office, vacation, delivery receipt, "I'm away"), use: out_of_office or auto_reply.
+- If it is a system/bounce or not a real message from a human prospect, use: not_a_reply.
+- Only if it is a genuine human reply from the person we emailed, continue to Step 2.
+
+## Step 2 \u2013 For real prospect replies only, choose ONE category:
+
+**hot** \u2013 Prospect shows interest and is open to more conversation or next steps.
+- Any expression of wanting more information or a conversation = hot.
+- Examples that MUST be classified as hot: "I'd love to hear more", "Tell me more", "Interested", "Would like to learn more", "Sounds interesting", "Let's talk", "When can we chat?", "Send me more info", "Happy to discuss", "Reach out", "I'd like to know more", "Hear more about it".
+- Rule: If the reply asks for more info, expresses interest, or invites contact \u2192 hot. Do NOT use objection for these.
+
+**soft** \u2013 Prospect is interested but indicates a timing issue only (e.g. "reach out next month", "try me in Q3", "not right now but later", "we're busy until X").
+
+**objection** \u2013 Prospect explicitly declines or says it is not a fit. No interest expressed.
+- Examples: "Not a fit", "We use someone else", "Not interested", "No thanks", "We're all set", "Don't need this", "Won't work for us".
+- Rule: Use objection ONLY when there is a clear decline. If the message contains interest phrases (hear more, tell me more, interested, learn more), it is hot, not objection.
+
+**negative** \u2013 Unsubscribe, hard no, or explicit request to stop all contact.
+
+## Examples (follow these strictly):
+- "I'd love to hear more about it from you." \u2192 hot (expresses interest)
+- "Tell me more about your offering." \u2192 hot
+- "Not a fit for us right now." \u2192 objection (decline, no interest)
+- "Reach out next quarter." \u2192 soft (timing)
+- "Unsubscribe" or "Remove me" \u2192 negative
+
+## Email to classify
+Subject: {SUBJECT}
+Body: {REPLY_TEXT}
+
+Respond with a single JSON object only. No other text.
+{ "category": "<one of: hot, soft, objection, negative, out_of_office, auto_reply, not_a_reply>", "confidence": <0-1 number>, "reason": "<one short line explaining why>" }`
+};
+var HOT_SIGNAL_PHRASES = [
+  "love to hear more",
+  "would love to hear more",
+  "tell me more",
+  "interested to hear more",
+  "interested to learn",
+  "would like to learn more",
+  "would like to hear more",
+  "sounds interesting",
+  "let's talk",
+  "when can we chat",
+  "send me more",
+  "i'm interested",
+  "happy to discuss",
+  "would like to know more",
+  "reach out",
+  "hear more about it"
+];
+
+// lib/slack-templates.ts
+function buildProcessRepliesMessage(p) {
+  const lines = [
+    `\u{1F4EC} *Process Replies Report*`,
+    `Date: ${p.date}`,
+    `\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`,
+    `Replies fetched: ${p.repliesFetched}`,
+    `*Customer reply (classified):* Hot ${p.hot}  |  Soft ${p.soft}  |  Objection ${p.objection}  |  Negative ${p.negative}`,
+    `*Not customer reply:* Out of office ${p.outOfOffice ?? 0}  |  Auto-reply ${p.autoReply ?? 0}  |  Not a reply ${p.notAReply ?? 0}`,
+    `Auto-replied (hot): ${p.autoReplied}`
+  ];
+  if (p.unreadCount !== void 0) {
+    lines.splice(3, 0, `Inbox unread: ${p.unreadCount}`);
+  }
+  lines.push(`\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`);
+  return lines.join("\n");
+}
+async function postSlackMessage(channel, text) {
+  const token = process.env.SLACK_BOT_TOKEN;
+  if (!token || !channel) return false;
+  try {
+    const res = await fetch("https://slack.com/api/chat.postMessage", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ channel, text })
+    });
+    if (!res.ok) return false;
+    const json = await res.json();
+    return json.ok === true;
+  } catch {
+    return false;
+  }
+}
+function postToReportChannel(text) {
+  const channel = process.env.SLACK_REPORT_CHANNEL || "";
+  return postSlackMessage(channel, text);
+}
+
 // skills/instantly/index.ts
 var INSTANTLY_API_KEY = process.env.INSTANTLY_API_KEY;
 var INSTANTLY_CAMPAIGN_ID = process.env.INSTANTLY_CAMPAIGN_ID;
 var OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 var MODE = process.env.MODE || "all";
-if (!INSTANTLY_API_KEY) {
-  console.error("\u274C INSTANTLY_API_KEY not found in env");
-  process.exit(1);
+var LOAD_LIMIT = parseIntSafe(process.env.LOAD_LIMIT, DEFAULTS.LOAD_LIMIT);
+function validateEnv() {
+  validateRequiredEnv(["INSTANTLY_API_KEY", "INSTANTLY_CAMPAIGN_ID", "SUPABASE_DB_URL"]);
+  if ((MODE === "fetch" || MODE === "all") && !OPENAI_API_KEY) {
+    console.error("\u274C OPENAI_API_KEY required for fetch/classify mode");
+    process.exit(1);
+  }
 }
-if (!INSTANTLY_CAMPAIGN_ID) {
-  console.error("\u274C INSTANTLY_CAMPAIGN_ID not found in env");
-  process.exit(1);
+function getFetchDateRange() {
+  return getDateRange(
+    process.env.FETCH_DATE_FROM,
+    process.env.FETCH_DATE_TO,
+    process.env.FETCH_DATE || process.env.REPORT_DATE
+  );
 }
-var INSTANTLY_BULK_ADD_MAX = 1e3;
 async function instantlyAddLeads(leads) {
   var _a;
   if (leads.length === 0) return { success: 0, failed: 0, successIds: [] };
-  const url = "https://api.instantly.ai/api/v2/leads/add";
   let totalSuccess = 0;
   let totalFailed = 0;
   const successIds = [];
-  for (let offset = 0; offset < leads.length; offset += INSTANTLY_BULK_ADD_MAX) {
-    const batch = leads.slice(offset, offset + INSTANTLY_BULK_ADD_MAX);
-    const batchNum = Math.floor(offset / INSTANTLY_BULK_ADD_MAX) + 1;
-    const totalBatches = Math.ceil(leads.length / INSTANTLY_BULK_ADD_MAX);
+  const batchSize = RATE_LIMITS.INSTANTLY_BULK_ADD_MAX;
+  const totalBatches = Math.ceil(leads.length / batchSize);
+  for (let offset = 0; offset < leads.length; offset += batchSize) {
+    const batch = leads.slice(offset, offset + batchSize);
+    const batchNum = Math.floor(offset / batchSize) + 1;
     const body = {
       campaign_id: INSTANTLY_CAMPAIGN_ID,
       skip_if_in_workspace: true,
@@ -191,11 +406,11 @@ async function instantlyAddLeads(leads) {
       }))
     };
     try {
-      const response = await fetch(url, {
+      const response = await fetch(API_ENDPOINTS.INSTANTLY.ADD_LEADS, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${INSTANTLY_API_KEY}`
+          Authorization: `Bearer ${INSTANTLY_API_KEY}`
         },
         body: JSON.stringify(body)
       });
@@ -205,16 +420,17 @@ async function instantlyAddLeads(leads) {
         const created = data.created_leads ?? [];
         totalSuccess += uploaded;
         for (const c of created) {
-          const idx = c.index;
-          if (typeof idx === "number" && ((_a = batch[idx]) == null ? void 0 : _a.id)) {
-            successIds.push(batch[idx].id);
+          if (typeof c.index === "number" && ((_a = batch[c.index]) == null ? void 0 : _a.id)) {
+            successIds.push(batch[c.index].id);
           }
         }
         const skipped = data.skipped_count ?? 0;
         const duped = data.duplicated_leads ?? 0;
         const invalid = data.invalid_email_count ?? 0;
         totalFailed += Math.max(0, batch.length - uploaded);
-        console.log(`   \u2705 Batch ${batchNum}/${totalBatches}: ${uploaded} uploaded, ${skipped} skipped, ${duped} duped, ${invalid} invalid`);
+        console.log(
+          `   \u2705 Batch ${batchNum}/${totalBatches}: ${uploaded} uploaded, ${skipped} skipped, ${duped} duped, ${invalid} invalid`
+        );
       } else {
         totalFailed += batch.length;
         const msg = data.message || data.error || "";
@@ -224,37 +440,13 @@ async function instantlyAddLeads(leads) {
       totalFailed += batch.length;
       console.error(`   \u274C Batch ${batchNum}/${totalBatches} error: ${error.message}`);
     }
-    if (offset + INSTANTLY_BULK_ADD_MAX < leads.length) {
-      await new Promise((r) => setTimeout(r, 500));
+    if (offset + batchSize < leads.length) {
+      await sleep(RATE_LIMITS.INSTANTLY_DELAY_MS);
     }
   }
   return { success: totalSuccess, failed: totalFailed, successIds };
 }
-function getFetchDateRange() {
-  const from = process.env.FETCH_DATE_FROM;
-  const to = process.env.FETCH_DATE_TO;
-  const single = process.env.FETCH_DATE || process.env.REPORT_DATE;
-  if (from && to) {
-    const [y1, m1, d1] = from.split("-").map(Number);
-    const [y2, m2, d2] = to.split("-").map(Number);
-    const minDate = new Date(Date.UTC(y1, (m1 || 1) - 1, d1 || 1));
-    const maxDate = new Date(Date.UTC(y2, (m2 || 1) - 1, d2 || 1));
-    maxDate.setUTCDate(maxDate.getUTCDate() + 1);
-    return { min: minDate.toISOString(), max: maxDate.toISOString() };
-  }
-  if (single) {
-    const [y, m, d] = single.split("-").map(Number);
-    const dayStart = new Date(Date.UTC(y, (m || 1) - 1, d || 1));
-    const dayEnd = new Date(dayStart);
-    dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
-    return { min: dayStart.toISOString(), max: dayEnd.toISOString() };
-  }
-  const now = /* @__PURE__ */ new Date();
-  const localStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const localEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-  return { min: localStart.toISOString(), max: localEnd.toISOString() };
-}
-async function instantlyFetchReplies(limit = 100) {
+async function instantlyFetchReplies(limit = DEFAULTS.FETCH_LIMIT) {
   const params = new URLSearchParams({
     campaign_id: INSTANTLY_CAMPAIGN_ID || "",
     email_type: "received",
@@ -264,9 +456,9 @@ async function instantlyFetchReplies(limit = 100) {
   const { min, max } = getFetchDateRange();
   params.set("min_timestamp_created", min);
   params.set("max_timestamp_created", max);
-  const url = `https://api.instantly.ai/api/v2/emails?${params.toString()}`;
+  const url = `${API_ENDPOINTS.INSTANTLY.EMAILS}?${params.toString()}`;
   const response = await fetch(url, {
-    headers: { "Authorization": `Bearer ${INSTANTLY_API_KEY}` }
+    headers: { Authorization: `Bearer ${INSTANTLY_API_KEY}` }
   });
   if (!response.ok) {
     throw new Error(`Instantly fetch replies failed: ${response.status}`);
@@ -278,7 +470,6 @@ async function instantlyFetchReplies(limit = 100) {
     return {
       email_id: e.id,
       eaccount: e.eaccount || process.env.INSTANTLY_EACCOUNT || "",
-      // eaccount from GET /emails response
       from_email: e.from_address_email || e.lead || e.from_email,
       body: (((_a = e.body) == null ? void 0 : _a.text) || ((_b = e.body) == null ? void 0 : _b.html) || "").trim(),
       subject: e.subject || "",
@@ -287,11 +478,9 @@ async function instantlyFetchReplies(limit = 100) {
   });
 }
 async function instantlyGetUnreadCount() {
-  const url = `https://api.instantly.ai/api/v2/emails/unread/count?campaign_id=${INSTANTLY_CAMPAIGN_ID}`;
+  const url = API_ENDPOINTS.INSTANTLY.UNREAD_COUNT(INSTANTLY_CAMPAIGN_ID || "");
   const response = await fetch(url, {
-    headers: {
-      "Authorization": `Bearer ${INSTANTLY_API_KEY}`
-    }
+    headers: { Authorization: `Bearer ${INSTANTLY_API_KEY}` }
   });
   if (!response.ok) {
     throw new Error(`Instantly unread count failed: ${response.status}`);
@@ -299,10 +488,79 @@ async function instantlyGetUnreadCount() {
   const data = await response.json();
   return typeof data.count === "number" ? data.count : data.unread_count ?? 0;
 }
-var BOOK_NOW_URL = "https://designpickle.com/design-pickle-consultation?ref=outbound";
-var COMPARE_URL = "https://designpickle.com/comparison";
+async function instantlyReplyToEmail(params) {
+  const response = await fetch(API_ENDPOINTS.INSTANTLY.REPLY, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${INSTANTLY_API_KEY}`
+    },
+    body: JSON.stringify({
+      reply_to_uuid: params.reply_to_uuid,
+      eaccount: params.eaccount,
+      subject: params.subject || "Re: Your inquiry",
+      body: { html: params.body_html, text: params.body_text }
+    })
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Instantly reply failed: ${response.status} ${text}`);
+  }
+}
+var OOO_SUBJECT_PATTERNS = /out of office|ooo|automatic reply|abwesenheit|réponse automatique/i;
+var OOO_BODY_PATTERNS = /out of (the )?office|away from (my )?office|I am currently out|I will be out|back on \d|returning on \d|limited access to (my )?email/i;
+var AUTO_REPLY_PATTERNS = /automatic reply|auto.reply|vacation reply|I'm away|I am away|delivery receipt|read receipt|this is an automated/i;
+function getNonReplyCategory(subject, body) {
+  const sub = (subject || "").trim();
+  const text = (body || "").trim();
+  const combined = `${sub} ${text}`.toLowerCase();
+  if (OOO_SUBJECT_PATTERNS.test(sub) || OOO_BODY_PATTERNS.test(combined)) {
+    return "out_of_office";
+  }
+  if (AUTO_REPLY_PATTERNS.test(combined)) {
+    return "auto_reply";
+  }
+  return null;
+}
+async function classifyReply(subject, replyText) {
+  var _a, _b, _c;
+  const prompt = PROMPTS.CLASSIFICATION.replace("{SUBJECT}", subject || "(no subject)").replace("{REPLY_TEXT}", replyText || "(empty)");
+  const response = await fetch(API_ENDPOINTS.OPENAI.CHAT_COMPLETIONS, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_API_KEY}`
+    },
+    body: JSON.stringify({
+      model: CLASSIFICATION_MODEL,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0,
+      response_format: { type: "json_object" }
+    })
+  });
+  if (!response.ok) {
+    throw new Error(`OpenAI API failed: ${response.status}`);
+  }
+  const data = await response.json();
+  const content = ((_c = (_b = (_a = data.choices) == null ? void 0 : _a[0]) == null ? void 0 : _b.message) == null ? void 0 : _c.content) || "";
+  const parsed = parseJsonSafe(content, {});
+  let rawCategory = (parsed.category || "").trim().toLowerCase();
+  if (!isValidReplyCategory(rawCategory)) rawCategory = "not_a_reply";
+  const confidence = typeof parsed.confidence === "number" ? parsed.confidence : 0;
+  if (parsed.reason && (rawCategory === "objection" || rawCategory === "hot")) {
+    console.log(`   [classify] ${rawCategory} (${confidence}): ${parsed.reason}`);
+  }
+  const bodyLower = (replyText || "").toLowerCase();
+  const hasHotSignal = HOT_SIGNAL_PHRASES.some((phrase) => bodyLower.includes(phrase.toLowerCase()));
+  const category = hasHotSignal && (rawCategory === "objection" || rawCategory === "soft") ? "hot" : rawCategory;
+  return {
+    category,
+    confidence
+  };
+}
 function buildHotReplyTemplate(firstName) {
   const name = firstName || "there";
+  const { BOOK_NOW_URL, COMPARE_URL } = HOT_REPLY_TEMPLATE;
   const html = `Awesome ${name},<br><br>You can schedule here: <a href="${BOOK_NOW_URL}">Book now</a><br><br>Have a look at this before we connect. Quickly covers us vs. alternatives.<br>\u{1F449} <a href="${COMPARE_URL}">Compare Design Pickle</a><br><br>See you then.<br>-Bryan Butvidas`;
   const text = `Awesome ${name},
 
@@ -317,76 +575,16 @@ See you then.
 -Bryan Butvidas`;
   return { html, text };
 }
-async function instantlyReplyToEmail(params) {
-  const url = "https://api.instantly.ai/api/v2/emails/reply";
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${INSTANTLY_API_KEY}`
-    },
-    body: JSON.stringify({
-      reply_to_uuid: params.reply_to_uuid,
-      eaccount: params.eaccount,
-      subject: params.subject || "Re: Your inquiry",
-      body: { html: params.body_html, text: params.body_text }
-    })
-  });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Instantly reply failed: ${response.status} ${text}`);
-  }
-}
-async function classifyReply(replyText) {
-  if (!OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY not found");
-  }
-  const prompt = `Classify this outbound email reply into one of four categories:
-- hot (ready to talk)
-- soft (interested but timing issue)
-- objection (decline with reason)
-- negative (unsubscribe or hard no)
-
-Reply: ${replyText}
-
-Return JSON only: { "category": "...", "confidence": 0-1 }`;
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${OPENAI_API_KEY}`
-    },
-    body: JSON.stringify({
-      model: "gpt-4",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0
-    })
-  });
-  if (!response.ok) {
-    throw new Error(`OpenAI API failed: ${response.status}`);
-  }
-  const data = await response.json();
-  const content = data.choices[0].message.content;
-  try {
-    const parsed = JSON.parse(content);
-    return {
-      category: parsed.category || "objection",
-      confidence: parsed.confidence || 0
-    };
-  } catch {
-    return { category: "objection", confidence: 0 };
-  }
-}
 async function runLoadService(db, runId) {
   console.log(`
 \u{1F4E4} Load Service: Pushing verified leads to Instantly...
 `);
-  const verifiedLeads = await getLeadsReadyForCampaign(db, 1e4);
+  const verifiedLeads = await getLeadsReadyForCampaign(db, LOAD_LIMIT);
   if (verifiedLeads.length === 0) {
-    console.log("\u2139\uFE0F  No verified leads to load (bouncer_verified, not blacklisted, 45-day ok)\n");
+    console.log("\u2139\uFE0F  No verified leads to load\n");
     return { processed: 0, succeeded: 0, failed: 0 };
   }
-  console.log(`\u{1F4CA} Found ${verifiedLeads.length} verified leads ready for campaign
+  console.log(`\u{1F4CA} Found ${verifiedLeads.length} verified leads (limit ${LOAD_LIMIT})
 `);
   const execId = await createServiceExecution(db, {
     pipeline_run_id: runId,
@@ -409,10 +607,14 @@ async function runLoadService(db, runId) {
       output_count: success,
       failed_count: failed
     });
-    console.log(`\\n\u2705 Load complete: ${success} loaded, ${failed} failed\\n`);
+    console.log(`
+\u2705 Load complete: ${success} loaded, ${failed} failed
+`);
     return { processed: verifiedLeads.length, succeeded: success, failed };
   } catch (error) {
-    console.error(`\\n\u274C Load failed: ${error.message}\\n`);
+    console.error(`
+\u274C Load failed: ${error.message}
+`);
     await updateServiceExecution(db, execId, {
       status: "failed",
       completed_at: /* @__PURE__ */ new Date(),
@@ -422,15 +624,15 @@ async function runLoadService(db, runId) {
   }
 }
 async function runFetchAndClassifyService(db, runId) {
-  var _a, _b;
   const { min, max } = getFetchDateRange();
   const dateLabel = process.env.FETCH_DATE_FROM && process.env.FETCH_DATE_TO ? `${process.env.FETCH_DATE_FROM} \u2192 ${process.env.FETCH_DATE_TO}` : process.env.FETCH_DATE || process.env.REPORT_DATE || "today";
   console.log(`
-\u{1F4E5} Fetch & Classify Service: Processing replies (${dateLabel}, ${min.slice(0, 10)} \u2192 ${max.slice(0, 10)})...
+\u{1F4E5} Fetch & Classify: Processing replies (${dateLabel})...
 `);
+  let unreadCount;
   try {
-    const unread = await instantlyGetUnreadCount();
-    console.log(`   \u{1F4EC} Unread count: ${unread}
+    unreadCount = await instantlyGetUnreadCount();
+    console.log(`   \u{1F4EC} Unread count: ${unreadCount}
 `);
   } catch {
   }
@@ -449,7 +651,18 @@ async function runFetchAndClassifyService(db, runId) {
         completed_at: /* @__PURE__ */ new Date(),
         output_count: 0
       });
-      return { processed: 0, hot: 0, soft: 0, objection: 0, negative: 0 };
+      return {
+        processed: 0,
+        hot: 0,
+        soft: 0,
+        objection: 0,
+        negative: 0,
+        out_of_office: 0,
+        auto_reply: 0,
+        not_a_reply: 0,
+        unreadCount,
+        dateLabel
+      };
     }
     console.log(`\u{1F4CA} Found ${replies.length} replies
 `);
@@ -467,15 +680,33 @@ async function runFetchAndClassifyService(db, runId) {
     if (toProcess.length === 0) {
       console.log(`\u2139\uFE0F  No new replies to process
 `);
-      await updateServiceExecution(db, execId, { status: "completed", completed_at: /* @__PURE__ */ new Date(), output_count: 0 });
-      return { processed: 0, hot: 0, soft: 0, objection: 0, negative: 0 };
+      await updateServiceExecution(db, execId, {
+        status: "completed",
+        completed_at: /* @__PURE__ */ new Date(),
+        output_count: 0
+      });
+      return {
+        processed: 0,
+        hot: 0,
+        soft: 0,
+        objection: 0,
+        negative: 0,
+        out_of_office: 0,
+        auto_reply: 0,
+        not_a_reply: 0,
+        unreadCount,
+        dateLabel
+      };
     }
-    let hot = 0, soft = 0, objection = 0, negative = 0;
+    let hot = 0, soft = 0, objection = 0, negative = 0, out_of_office = 0, auto_reply = 0, not_a_reply = 0;
     for (const reply of toProcess) {
       try {
-        const classification = await classifyReply(reply.body || "");
-        console.log(`   ${reply.from_email}: ${classification.category} (confidence: ${classification.confidence})`);
-        const bodySnippet = (reply.body || "").substring(0, 500);
+        const subject = reply.subject || "";
+        const body = reply.body || "";
+        const nonReply = getNonReplyCategory(subject, body);
+        const classification = nonReply ? { category: nonReply, confidence: 1 } : await classifyReply(subject, body);
+        console.log(`   ${reply.from_email}: ${classification.category} (${classification.confidence})`);
+        const bodySnippet = body.substring(0, 500);
         await db.query(
           `INSERT INTO replies 
            (from_email, subject, body_snippet, thread_id, reply_category, category_confidence, 
@@ -488,63 +719,42 @@ async function runFetchAndClassifyService(db, runId) {
              updated_at = NOW()`,
           [
             reply.from_email,
-            reply.subject || "",
+            subject,
             bodySnippet,
             reply.thread_id || `thread-${Date.now()}`,
             classification.category,
             classification.confidence
           ]
         );
-        if (classification.category === "negative") {
-          const leadRes = await db.query(
-            `SELECT id FROM leads WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1`,
-            [reply.from_email]
-          );
-          if (leadRes.rows.length > 0) {
-            await db.query(
-              `UPDATE leads SET blacklisted = true, blacklist_reason = 'negative_reply', updated_at = NOW() WHERE id = $1`,
-              [leadRes.rows[0].id]
-            );
-            console.log(`   \u26D4 Blacklisted lead: ${reply.from_email}`);
-          }
+        switch (classification.category) {
+          case "hot":
+            hot++;
+            await handleHotLead(db, reply);
+            break;
+          case "soft":
+            soft++;
+            break;
+          case "objection":
+            objection++;
+            break;
+          case "negative":
+            negative++;
+            await blacklistLead(db, reply.from_email);
+            break;
+          case "out_of_office":
+            out_of_office++;
+            break;
+          case "auto_reply":
+            auto_reply++;
+            break;
+          case "not_a_reply":
+            not_a_reply++;
+            break;
         }
-        if (classification.category === "hot") {
-          hot++;
-          if (reply.email_id && reply.eaccount) {
-            try {
-              const leadRes = await db.query(
-                `SELECT first_name FROM leads WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1`,
-                [reply.from_email]
-              );
-              const firstName = ((_b = (_a = leadRes.rows[0]) == null ? void 0 : _a.first_name) == null ? void 0 : _b.trim()) || "";
-              const { html, text } = buildHotReplyTemplate(firstName);
-              const subject = (reply.subject || "").startsWith("Re:") ? reply.subject : `Re: ${reply.subject || "Your inquiry"}`;
-              await instantlyReplyToEmail({
-                reply_to_uuid: reply.email_id,
-                eaccount: reply.eaccount,
-                subject,
-                body_html: html,
-                body_text: text
-              });
-              await db.query(
-                `UPDATE replies SET replied_at = NOW(), updated_at = NOW() WHERE thread_id = $1`,
-                [reply.thread_id]
-              );
-              console.log(`   \u{1F4E4} Replied to hot lead: ${reply.from_email}`);
-              await new Promise((r) => setTimeout(r, 300));
-            } catch (err) {
-              console.error(`   \u274C Reply failed for ${reply.from_email}: ${err.message}`);
-            }
-          } else {
-            console.log(`   \u26A0\uFE0F  Skip reply (missing email_id/eaccount): ${reply.from_email}`);
-          }
-        } else if (classification.category === "soft") soft++;
-        else if (classification.category === "objection") objection++;
-        else negative++;
       } catch (error) {
-        console.error(`   \u274C Error processing reply from ${reply.from_email}: ${error.message}`);
+        console.error(`   \u274C Error processing ${reply.from_email}: ${error.message}`);
       }
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await sleep(RATE_LIMITS.INSTANTLY_DELAY_MS);
     }
     await updateServiceExecution(db, execId, {
       status: "completed",
@@ -552,15 +762,28 @@ async function runFetchAndClassifyService(db, runId) {
       output_count: toProcess.length
     });
     console.log(`
-\u2705 Classification complete:
+\u2705 Classification complete:`);
+    console.log(
+      `   Customer replies: Hot ${hot}, Soft ${soft}, Objection ${objection}, Negative ${negative}`
+    );
+    console.log(`   Not customer reply: Out of office ${out_of_office}, Auto-reply ${auto_reply}, Not a reply ${not_a_reply}
 `);
-    console.log(`   Hot: ${hot}`);
-    console.log(`   Soft: ${soft}`);
-    console.log(`   Objection: ${objection}`);
-    console.log(`   Negative: ${negative}\\n`);
-    return { processed: toProcess.length, hot, soft, objection, negative };
+    return {
+      processed: toProcess.length,
+      hot,
+      soft,
+      objection,
+      negative,
+      out_of_office,
+      auto_reply,
+      not_a_reply,
+      unreadCount,
+      dateLabel
+    };
   } catch (error) {
-    console.error(`\\n\u274C Fetch & classify failed: ${error.message}\\n`);
+    console.error(`
+\u274C Fetch & classify failed: ${error.message}
+`);
     await updateServiceExecution(db, execId, {
       status: "failed",
       completed_at: /* @__PURE__ */ new Date(),
@@ -569,8 +792,49 @@ async function runFetchAndClassifyService(db, runId) {
     throw error;
   }
 }
+async function handleHotLead(db, reply) {
+  var _a, _b, _c;
+  if (!reply.email_id || !reply.eaccount) {
+    console.log(`   \u26A0\uFE0F  Skip reply (missing email_id/eaccount): ${reply.from_email}`);
+    return;
+  }
+  try {
+    const leadRes = await db.query(
+      `SELECT first_name FROM leads WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1`,
+      [reply.from_email]
+    );
+    const firstName = ((_b = (_a = leadRes.rows[0]) == null ? void 0 : _a.first_name) == null ? void 0 : _b.trim()) || "";
+    const { html, text } = buildHotReplyTemplate(firstName);
+    const subject = ((_c = reply.subject) == null ? void 0 : _c.startsWith("Re:")) ? reply.subject : `Re: ${reply.subject || "Your inquiry"}`;
+    await instantlyReplyToEmail({
+      reply_to_uuid: reply.email_id,
+      eaccount: reply.eaccount,
+      subject,
+      body_html: html,
+      body_text: text
+    });
+    await db.query(`UPDATE replies SET replied_at = NOW(), updated_at = NOW() WHERE thread_id = $1`, [reply.thread_id]);
+    console.log(`   \u{1F4E4} Replied to hot lead: ${reply.from_email}`);
+    await sleep(300);
+  } catch (err) {
+    console.error(`   \u274C Reply failed for ${reply.from_email}: ${err.message}`);
+  }
+}
+async function blacklistLead(db, email) {
+  const leadRes = await db.query(`SELECT id FROM leads WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1`, [email]);
+  if (leadRes.rows.length > 0) {
+    await db.query(
+      `UPDATE leads SET blacklisted = true, blacklist_reason = 'negative_reply', updated_at = NOW() WHERE id = $1`,
+      [leadRes.rows[0].id]
+    );
+    console.log(`   \u26D4 Blacklisted lead: ${email}`);
+  }
+}
 async function main() {
-  console.log(`\\n\u{1F680} Instantly Service Starting (MODE: ${MODE})\\n`);
+  validateEnv();
+  console.log(`
+\u{1F680} Instantly Service Starting (MODE: ${MODE})
+`);
   const db = getDb();
   if (!db) {
     console.error("\u274C Failed to connect to database");
@@ -582,16 +846,18 @@ async function main() {
   });
   try {
     let totalProcessed = 0, totalSucceeded = 0, totalFailed = 0;
+    let fetchResult = null;
     if (MODE === "load" || MODE === "all") {
-      const loadResult = await runLoadService(db, runId);
-      totalProcessed += loadResult.processed;
-      totalSucceeded += loadResult.succeeded;
-      totalFailed += loadResult.failed;
+      const result = await runLoadService(db, runId);
+      totalProcessed += result.processed;
+      totalSucceeded += result.succeeded;
+      totalFailed += result.failed;
     }
-    if (MODE === "fetch" || MODE === "classify" || MODE === "all") {
-      const fetchResult = await runFetchAndClassifyService(db, runId);
-      totalProcessed += fetchResult.processed;
-      totalSucceeded += fetchResult.processed;
+    if (MODE === "fetch" || MODE === "all") {
+      const result = await runFetchAndClassifyService(db, runId);
+      fetchResult = result;
+      totalProcessed += result.processed;
+      totalSucceeded += result.processed;
     }
     await updatePipelineRun(db, runId, {
       status: "completed",
@@ -600,9 +866,29 @@ async function main() {
       leads_succeeded: totalSucceeded,
       leads_failed: totalFailed
     });
-    console.log(`\u2705 Instantly Service Complete\\n`);
+    if (fetchResult && process.env.SLACK_REPORT_CHANNEL) {
+      const dateForReport = process.env.FETCH_DATE || process.env.REPORT_DATE || (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+      const msg = buildProcessRepliesMessage({
+        date: dateForReport,
+        unreadCount: fetchResult.unreadCount,
+        repliesFetched: fetchResult.processed,
+        hot: fetchResult.hot,
+        soft: fetchResult.soft,
+        objection: fetchResult.objection,
+        negative: fetchResult.negative,
+        outOfOffice: fetchResult.out_of_office,
+        autoReply: fetchResult.auto_reply,
+        notAReply: fetchResult.not_a_reply,
+        autoReplied: fetchResult.hot
+      });
+      await postToReportChannel(msg);
+    }
+    console.log(`\u2705 Instantly Service Complete
+`);
   } catch (error) {
-    console.error(`\\n\u274C Instantly Service Failed: ${error.message}\\n`);
+    console.error(`
+\u274C Instantly Service Failed: ${error.message}
+`);
     await updatePipelineRun(db, runId, {
       status: "failed",
       completed_at: /* @__PURE__ */ new Date(),

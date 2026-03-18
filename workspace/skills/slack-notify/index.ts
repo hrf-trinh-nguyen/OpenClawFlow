@@ -8,26 +8,25 @@
  * Note: Legacy workflow_runs/skill_executions tracking removed (migration 008).
  */
 import { stateGet } from '../../lib/state.js';
+import { validateRequiredEnv } from '../../lib/utils.js';
+import { API_ENDPOINTS } from '../../lib/constants.js';
 
 async function main() {
-  const botToken = process.env.SLACK_BOT_TOKEN;
-  const channel  = process.env.SLACK_REPORT_CHANNEL;
+  validateRequiredEnv(['SLACK_BOT_TOKEN', 'SLACK_REPORT_CHANNEL']);
 
-  if (!botToken || !channel) {
-    console.error('Error: Missing SLACK_BOT_TOKEN or SLACK_REPORT_CHANNEL');
-    process.exit(1);
-  }
+  const botToken = process.env.SLACK_BOT_TOKEN!;
+  const channel = process.env.SLACK_REPORT_CHANNEL!;
 
   const text: string = stateGet<string>('daily_report_text') ?? '';
   if (!text) {
-    console.error('Error: No daily_report_text in state — run report-build first');
+    console.error('❌ No daily_report_text in state — run report-build first');
     process.exit(1);
   }
 
   console.log(`Slack Notify – sending report to channel ${channel}`);
 
   try {
-    const resp = await fetch('https://slack.com/api/chat.postMessage', {
+    const resp = await fetch(API_ENDPOINTS.SLACK.POST_MESSAGE, {
       method: 'POST',
       headers: { Authorization: `Bearer ${botToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ channel, text }),
@@ -39,7 +38,7 @@ async function main() {
     console.log(`  Report sent to channel ${channel}`);
     console.log('Done: report sent to Slack');
   } catch (err: any) {
-    console.error(`Error: Slack send failed: ${err.message}`);
+    console.error(`❌ Slack send failed: ${err.message}`);
     process.exit(1);
   }
 }

@@ -2,65 +2,103 @@
 
 /**
  * Instantly Service (Consolidated)
- * 
- * Combines: instantly-load + instantly-fetch + llm-classify
- * - Load: Push verified leads to Instantly campaign
- * - Fetch: Pull replies from Instantly inbox
- * - Classify: Use LLM to classify replies (hot/soft/objection/negative)
- * 
+ *
+ * Modes:
+ * - load:    Push verified leads to Instantly campaign
+ * - fetch:   Pull replies from Instantly inbox, classify via LLM, auto-reply hot leads
+ * - all:     Run both load + fetch
+ *
  * ENV variables:
- * - INSTANTLY_API_KEY: Instantly API key
- * - INSTANTLY_CAMPAIGN_ID: Campaign ID
- * - ANTHROPIC_API_KEY: Anthropic API key (for classification, preferred)
- * - OPENAI_API_KEY: OpenAI API key (legacy fallback, optional)
- * - SUPABASE_DB_URL: PostgreSQL connection string
- * - MODE: 'load' | 'fetch' | 'classify' | 'all' (default: 'all')
- * - LOAD_LIMIT: Max verified leads to load in a single run (default: 100)
- * - FETCH_DATE: Optional YYYY-MM-DD for single day (overrides default today)
- * - FETCH_DATE_FROM + FETCH_DATE_TO: Date range (YYYY-MM-DD) when user provides start/end
- * - When no date params: defaults to TODAY only (0h-24h local) to avoid pulling all replies
- *   Uses min_timestamp_created/max_timestamp_created per Instantly API v2
+ * - INSTANTLY_API_KEY: Instantly API key (required)
+ * - INSTANTLY_CAMPAIGN_ID: Campaign ID (required)
+ * - OPENAI_API_KEY: OpenAI API key for reply classification (required for fetch mode)
+ * - SUPABASE_DB_URL: PostgreSQL connection string (required)
+ * - MODE: 'load' | 'fetch' | 'all' (default: 'all')
+ * - LOAD_LIMIT: Max verified leads to load per run (default: 100)
+ * - FETCH_DATE: Single day YYYY-MM-DD (optional, defaults to today)
+ * - FETCH_DATE_FROM + FETCH_DATE_TO: Date range (optional)
  */
 
-import { getDb, createPipelineRun, updatePipelineRun, createServiceExecution, updateServiceExecution, getLeadsReadyForCampaign, batchUpdateLeadStatus } from '../../lib/supabase-pipeline.js';
+import {
+  getDb,
+  createPipelineRun,
+  updatePipelineRun,
+  createServiceExecution,
+  updateServiceExecution,
+  getLeadsReadyForCampaign,
+  batchUpdateLeadStatus,
+} from '../../lib/supabase-pipeline.js';
+import {
+  sleep,
+  parseJsonSafe,
+  validateRequiredEnv,
+  getDateRange,
+  parseIntSafe,
+} from '../../lib/utils.js';
+import {
+  RATE_LIMITS,
+  DEFAULTS,
+  API_ENDPOINTS,
+  HOT_REPLY_TEMPLATE,
+  PROMPTS,
+  isValidReplyCategory,
+  HOT_SIGNAL_PHRASES,
+  CLASSIFICATION_MODEL,
+  type ReplyCategory,
+} from '../../lib/constants.js';
+import {
+  buildProcessRepliesMessage,
+  postToReportChannel,
+} from '../../lib/slack-templates.js';
 
 // ── Configuration ──────────────────────────────────────────────────
 
 const INSTANTLY_API_KEY = process.env.INSTANTLY_API_KEY;
 const INSTANTLY_CAMPAIGN_ID = process.env.INSTANTLY_CAMPAIGN_ID;
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const MODE = process.env.MODE || 'all';
-const LOAD_LIMIT = parseInt(process.env.LOAD_LIMIT || '100', 10);
+const LOAD_LIMIT = parseIntSafe(process.env.LOAD_LIMIT, DEFAULTS.LOAD_LIMIT);
 
-if (!INSTANTLY_API_KEY) {
-  console.error('❌ INSTANTLY_API_KEY not found in env');
-  process.exit(1);
+// ── Validation ─────────────────────────────────────────────────────
+
+function validateEnv(): void {
+  validateRequiredEnv(['INSTANTLY_API_KEY', 'INSTANTLY_CAMPAIGN_ID', 'SUPABASE_DB_URL']);
+  if ((MODE === 'fetch' || MODE === 'all') && !OPENAI_API_KEY) {
+    console.error('❌ OPENAI_API_KEY required for fetch/classify mode');
+    process.exit(1);
+  }
 }
 
-if (!INSTANTLY_CAMPAIGN_ID) {
-  console.error('❌ INSTANTLY_CAMPAIGN_ID not found in env');
-  process.exit(1);
+// ── Date Range ─────────────────────────────────────────────────────
+
+function getFetchDateRange(): { min: string; max: string } {
+  return getDateRange(
+    process.env.FETCH_DATE_FROM,
+    process.env.FETCH_DATE_TO,
+    process.env.FETCH_DATE || process.env.REPORT_DATE
+  );
 }
 
 // ── Instantly API ──────────────────────────────────────────────────
-// Bulk add: POST /api/v2/leads/add — max 1000 leads per request
-// https://developer.instantly.ai/api/v2/lead/bulkaddleads
 
-const INSTANTLY_BULK_ADD_MAX = 1000;
+interface AddLeadsResult {
+  success: number;
+  failed: number;
+  successIds: string[];
+}
 
-async function instantlyAddLeads(leads: any[]): Promise<{ success: number; failed: number; successIds: string[] }> {
+async function instantlyAddLeads(leads: any[]): Promise<AddLeadsResult> {
   if (leads.length === 0) return { success: 0, failed: 0, successIds: [] };
 
-  const url = 'https://api.instantly.ai/api/v2/leads/add';
   let totalSuccess = 0;
   let totalFailed = 0;
   const successIds: string[] = [];
+  const batchSize = RATE_LIMITS.INSTANTLY_BULK_ADD_MAX;
+  const totalBatches = Math.ceil(leads.length / batchSize);
 
-  for (let offset = 0; offset < leads.length; offset += INSTANTLY_BULK_ADD_MAX) {
-    const batch = leads.slice(offset, offset + INSTANTLY_BULK_ADD_MAX);
-    const batchNum = Math.floor(offset / INSTANTLY_BULK_ADD_MAX) + 1;
-    const totalBatches = Math.ceil(leads.length / INSTANTLY_BULK_ADD_MAX);
+  for (let offset = 0; offset < leads.length; offset += batchSize) {
+    const batch = leads.slice(offset, offset + batchSize);
+    const batchNum = Math.floor(offset / batchSize) + 1;
 
     const body = {
       campaign_id: INSTANTLY_CAMPAIGN_ID,
@@ -71,18 +109,18 @@ async function instantlyAddLeads(leads: any[]): Promise<{ success: number; faile
         first_name: l.first_name || null,
         last_name: l.last_name || null,
         company_name: l.company_name || null,
-        personalization: l.title || null
-      }))
+        personalization: l.title || null,
+      })),
     };
 
     try {
-      const response = await fetch(url, {
+      const response = await fetch(API_ENDPOINTS.INSTANTLY.ADD_LEADS, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${INSTANTLY_API_KEY}`
+          Authorization: `Bearer ${INSTANTLY_API_KEY}`,
         },
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
       });
 
       const data = await response.json().catch(() => ({}));
@@ -93,17 +131,19 @@ async function instantlyAddLeads(leads: any[]): Promise<{ success: number; faile
         totalSuccess += uploaded;
 
         for (const c of created) {
-          const idx = c.index;
-          if (typeof idx === 'number' && batch[idx]?.id) {
-            successIds.push(batch[idx].id);
+          if (typeof c.index === 'number' && batch[c.index]?.id) {
+            successIds.push(batch[c.index].id);
           }
         }
+
         const skipped = data.skipped_count ?? 0;
         const duped = data.duplicated_leads ?? 0;
         const invalid = data.invalid_email_count ?? 0;
         totalFailed += Math.max(0, batch.length - uploaded);
 
-        console.log(`   ✅ Batch ${batchNum}/${totalBatches}: ${uploaded} uploaded, ${skipped} skipped, ${duped} duped, ${invalid} invalid`);
+        console.log(
+          `   ✅ Batch ${batchNum}/${totalBatches}: ${uploaded} uploaded, ${skipped} skipped, ${duped} duped, ${invalid} invalid`
+        );
       } else {
         totalFailed += batch.length;
         const msg = data.message || data.error || '';
@@ -114,71 +154,39 @@ async function instantlyAddLeads(leads: any[]): Promise<{ success: number; faile
       console.error(`   ❌ Batch ${batchNum}/${totalBatches} error: ${error.message}`);
     }
 
-    if (offset + INSTANTLY_BULK_ADD_MAX < leads.length) {
-      await new Promise((r) => setTimeout(r, 500));
+    if (offset + batchSize < leads.length) {
+      await sleep(RATE_LIMITS.INSTANTLY_DELAY_MS);
     }
   }
 
   return { success: totalSuccess, failed: totalFailed, successIds };
 }
 
-/**
- * Compute date range for fetch. Always filters by date (never fetch all).
- * - No params: today 0h-24h (local)
- * - FETCH_DATE: single day
- * - FETCH_DATE_FROM + FETCH_DATE_TO: date range
- */
-function getFetchDateRange(): { min: string; max: string } {
-  const from = process.env.FETCH_DATE_FROM;
-  const to = process.env.FETCH_DATE_TO;
-  const single = process.env.FETCH_DATE || process.env.REPORT_DATE;
-
-  if (from && to) {
-    const [y1, m1, d1] = from.split('-').map(Number);
-    const [y2, m2, d2] = to.split('-').map(Number);
-    const minDate = new Date(Date.UTC(y1, (m1 || 1) - 1, d1 || 1));
-    const maxDate = new Date(Date.UTC(y2, (m2 || 1) - 1, d2 || 1));
-    maxDate.setUTCDate(maxDate.getUTCDate() + 1);
-    return { min: minDate.toISOString(), max: maxDate.toISOString() };
-  }
-
-  if (single) {
-    const [y, m, d] = single.split('-').map(Number);
-    const dayStart = new Date(Date.UTC(y, (m || 1) - 1, d || 1));
-    const dayEnd = new Date(dayStart);
-    dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
-    return { min: dayStart.toISOString(), max: dayEnd.toISOString() };
-  }
-
-  // Default: today 0h-24h (local timezone)
-  const now = new Date();
-  const localStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const localEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-  return { min: localStart.toISOString(), max: localEnd.toISOString() };
+interface Reply {
+  email_id: string;
+  eaccount: string;
+  from_email: string;
+  body: string;
+  subject: string;
+  thread_id: string;
 }
 
-/**
- * Fetch received emails from Instantly API v2.
- * GET /api/v2/emails — returns { items, next_starting_after }
- * Always filters by date (today by default) to avoid pulling all replies.
- * @see https://developer.instantly.ai/api/v2/email/def-2
- */
-async function instantlyFetchReplies(limit: number = 100): Promise<any[]> {
+async function instantlyFetchReplies(limit: number = DEFAULTS.FETCH_LIMIT): Promise<Reply[]> {
   const params = new URLSearchParams({
     campaign_id: INSTANTLY_CAMPAIGN_ID || '',
     email_type: 'received',
     sort_order: 'asc',
-    limit: String(limit)
+    limit: String(limit),
   });
 
   const { min, max } = getFetchDateRange();
   params.set('min_timestamp_created', min);
   params.set('max_timestamp_created', max);
 
-  const url = `https://api.instantly.ai/api/v2/emails?${params.toString()}`;
+  const url = `${API_ENDPOINTS.INSTANTLY.EMAILS}?${params.toString()}`;
 
   const response = await fetch(url, {
-    headers: { 'Authorization': `Bearer ${INSTANTLY_API_KEY}` }
+    headers: { Authorization: `Bearer ${INSTANTLY_API_KEY}` },
   });
 
   if (!response.ok) {
@@ -188,24 +196,21 @@ async function instantlyFetchReplies(limit: number = 100): Promise<any[]> {
   const data = await response.json();
   const raw = data.items || data.emails || [];
 
-  // API v2: id (reply_to_uuid), eaccount (account that sent original email to lead = our reply-from account).
   return raw.map((e: any) => ({
     email_id: e.id,
-    eaccount: e.eaccount || process.env.INSTANTLY_EACCOUNT || '', // eaccount from GET /emails response
+    eaccount: e.eaccount || process.env.INSTANTLY_EACCOUNT || '',
     from_email: e.from_address_email || e.lead || e.from_email,
     body: (e.body?.text || e.body?.html || '').trim(),
     subject: e.subject || '',
-    thread_id: e.thread_id || e.id
+    thread_id: e.thread_id || e.id,
   }));
 }
 
 async function instantlyGetUnreadCount(): Promise<number> {
-  const url = `https://api.instantly.ai/api/v2/emails/unread/count?campaign_id=${INSTANTLY_CAMPAIGN_ID}`;
+  const url = API_ENDPOINTS.INSTANTLY.UNREAD_COUNT(INSTANTLY_CAMPAIGN_ID || '');
 
   const response = await fetch(url, {
-    headers: {
-      'Authorization': `Bearer ${INSTANTLY_API_KEY}`
-    }
+    headers: { Authorization: `Bearer ${INSTANTLY_API_KEY}` },
   });
 
   if (!response.ok) {
@@ -216,23 +221,6 @@ async function instantlyGetUnreadCount(): Promise<number> {
   return typeof data.count === 'number' ? data.count : (data.unread_count ?? 0);
 }
 
-// ── Hot Reply Template (Design Pickle) ─────────────────────────────────────
-
-const BOOK_NOW_URL = 'https://designpickle.com/design-pickle-consultation';
-const COMPARE_URL = 'https://designpickle.com/comparison';
-
-function buildHotReplyTemplate(firstName: string): { html: string; text: string } {
-  const name = firstName || 'there';
-  const html = `Awesome ${name},<br><br>You can schedule here: <a href="${BOOK_NOW_URL}">Book now</a><br><br>Have a look at this before we connect. Quickly covers us vs. alternatives.<br>👉 <a href="${COMPARE_URL}">Compare Design Pickle</a><br><br>See you then.<br>-Bryan Butvidas`;
-  const text = `Awesome ${name},\n\nYou can schedule here: Book now\n${BOOK_NOW_URL}\n\nHave a look at this before we connect. Quickly covers us vs. alternatives.\n👉 Compare Design Pickle\n${COMPARE_URL}\n\nSee you then.\n-Bryan Butvidas`;
-  return { html, text };
-}
-
-/**
- * Reply to an email via Instantly API v2.
- * @see https://developer.instantly.ai/api/v2/email/replytoemail
- * Uses reply_to_uuid (email id) and eaccount (sending account).
- */
 async function instantlyReplyToEmail(params: {
   reply_to_uuid: string;
   eaccount: string;
@@ -240,20 +228,18 @@ async function instantlyReplyToEmail(params: {
   body_html: string;
   body_text: string;
 }): Promise<void> {
-  const url = 'https://api.instantly.ai/api/v2/emails/reply';
-
-  const response = await fetch(url, {
+  const response = await fetch(API_ENDPOINTS.INSTANTLY.REPLY, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${INSTANTLY_API_KEY}`
+      Authorization: `Bearer ${INSTANTLY_API_KEY}`,
     },
     body: JSON.stringify({
       reply_to_uuid: params.reply_to_uuid,
       eaccount: params.eaccount,
       subject: params.subject || 'Re: Your inquiry',
-      body: { html: params.body_html, text: params.body_text }
-    })
+      body: { html: params.body_html, text: params.body_text },
+    }),
   });
 
   if (!response.ok) {
@@ -262,70 +248,50 @@ async function instantlyReplyToEmail(params: {
   }
 }
 
-// ── LLM Classification (Anthropic preferred, OpenAI fallback) ─────
+// ── Pre-filter: detect non-customer messages (skip LLM) ──────────────
 
-async function classifyReply(replyText: string): Promise<{ category: string; confidence: number }> {
-  const prompt = `Classify this outbound email reply into one of four categories:
-- hot (ready to talk)
-- soft (interested but timing issue)
-- objection (decline with reason)
-- negative (unsubscribe or hard no)
+const OOO_SUBJECT_PATTERNS = /out of office|ooo|automatic reply|abwesenheit|réponse automatique/i;
+const OOO_BODY_PATTERNS = /out of (the )?office|away from (my )?office|I am currently out|I will be out|back on \d|returning on \d|limited access to (my )?email/i;
+const AUTO_REPLY_PATTERNS = /automatic reply|auto.reply|vacation reply|I'm away|I am away|delivery receipt|read receipt|this is an automated/i;
 
-Reply: ${replyText}
+/** If the message looks like OOO or auto-reply, return that category so we skip LLM and only store. */
+function getNonReplyCategory(subject: string, body: string): 'out_of_office' | 'auto_reply' | null {
+  const sub = (subject || '').trim();
+  const text = (body || '').trim();
+  const combined = `${sub} ${text}`.toLowerCase();
 
-Return JSON only: { "category": "...", "confidence": 0-1 }`;
-
-  // Prefer Anthropic if configured
-  if (ANTHROPIC_API_KEY) {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-3-5-sonnet-latest',
-        max_tokens: 128,
-        temperature: 0,
-        messages: [{ role: 'user', content: prompt }]
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`Anthropic API failed: ${response.status}`);
-    }
-
-    const data = await response.json();
-    const content = (data.content && data.content[0]?.text) || '';
-
-    try {
-      const parsed = JSON.parse(content);
-      return {
-        category: parsed.category || 'objection',
-        confidence: parsed.confidence || 0.0
-      };
-    } catch {
-      return { category: 'objection', confidence: 0.0 };
-    }
+  if (OOO_SUBJECT_PATTERNS.test(sub) || OOO_BODY_PATTERNS.test(combined)) {
+    return 'out_of_office';
   }
-
-  // Legacy OpenAI fallback if Anthropic is not configured
-  if (!OPENAI_API_KEY) {
-    throw new Error('Neither ANTHROPIC_API_KEY nor OPENAI_API_KEY is configured');
+  if (AUTO_REPLY_PATTERNS.test(combined)) {
+    return 'auto_reply';
   }
+  return null;
+}
 
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+// ── LLM Classification (OpenAI) ────────────────────────────────────
+
+interface Classification {
+  category: ReplyCategory;
+  confidence: number;
+}
+
+async function classifyReply(subject: string, replyText: string): Promise<Classification> {
+  const prompt = PROMPTS.CLASSIFICATION.replace('{SUBJECT}', subject || '(no subject)')
+    .replace('{REPLY_TEXT}', replyText || '(empty)');
+
+  const response = await fetch(API_ENDPOINTS.OPENAI.CHAT_COMPLETIONS, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${OPENAI_API_KEY}`
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
     },
     body: JSON.stringify({
-      model: 'gpt-4',
+      model: CLASSIFICATION_MODEL,
       messages: [{ role: 'user', content: prompt }],
-      temperature: 0
-    })
+      temperature: 0,
+      response_format: { type: 'json_object' },
+    }),
   });
 
   if (!response.ok) {
@@ -333,44 +299,77 @@ Return JSON only: { "category": "...", "confidence": 0-1 }`;
   }
 
   const data = await response.json();
-  const content = data.choices[0].message.content;
+  const content = data.choices?.[0]?.message?.content || '';
 
-  try {
-    const parsed = JSON.parse(content);
-    return {
-      category: parsed.category || 'objection',
-      confidence: parsed.confidence || 0.0
-    };
-  } catch {
-    return { category: 'objection', confidence: 0.0 };
+  const parsed = parseJsonSafe<{
+    category?: string;
+    confidence?: number;
+    reason?: string;
+  }>(content, {});
+
+  let rawCategory = (parsed.category || '').trim().toLowerCase();
+  if (!isValidReplyCategory(rawCategory)) rawCategory = 'not_a_reply';
+
+  const confidence = typeof parsed.confidence === 'number' ? parsed.confidence : 0;
+  if (parsed.reason && (rawCategory === 'objection' || rawCategory === 'hot')) {
+    console.log(`   [classify] ${rawCategory} (${confidence}): ${parsed.reason}`);
   }
+
+  // Override: clear interest phrases must be hot, not objection/soft
+  const bodyLower = (replyText || '').toLowerCase();
+  const hasHotSignal = HOT_SIGNAL_PHRASES.some((phrase) => bodyLower.includes(phrase.toLowerCase()));
+  const category: ReplyCategory =
+    hasHotSignal && (rawCategory === 'objection' || rawCategory === 'soft')
+      ? 'hot'
+      : (rawCategory as ReplyCategory);
+
+  return {
+    category,
+    confidence,
+  };
 }
 
-// ── Service Functions ──────────────────────────────────────────────
+// ── Hot Reply Template ─────────────────────────────────────────────
 
-async function runLoadService(db: any, runId: string) {
+function buildHotReplyTemplate(firstName: string): { html: string; text: string } {
+  const name = firstName || 'there';
+  const { BOOK_NOW_URL, COMPARE_URL } = HOT_REPLY_TEMPLATE;
+
+  const html = `Awesome ${name},<br><br>You can schedule here: <a href="${BOOK_NOW_URL}">Book now</a><br><br>Have a look at this before we connect. Quickly covers us vs. alternatives.<br>👉 <a href="${COMPARE_URL}">Compare Design Pickle</a><br><br>See you then.<br>-Bryan Butvidas`;
+  const text = `Awesome ${name},\n\nYou can schedule here: Book now\n${BOOK_NOW_URL}\n\nHave a look at this before we connect. Quickly covers us vs. alternatives.\n👉 Compare Design Pickle\n${COMPARE_URL}\n\nSee you then.\n-Bryan Butvidas`;
+  return { html, text };
+}
+
+// ── Load Service ───────────────────────────────────────────────────
+
+interface LoadResult {
+  processed: number;
+  succeeded: number;
+  failed: number;
+}
+
+async function runLoadService(db: any, runId: string): Promise<LoadResult> {
   console.log(`\n📤 Load Service: Pushing verified leads to Instantly...\n`);
 
   const verifiedLeads = await getLeadsReadyForCampaign(db, LOAD_LIMIT);
 
   if (verifiedLeads.length === 0) {
-    console.log('ℹ️  No verified leads to load (bouncer_verified, not blacklisted, 45-day ok)\n');
+    console.log('ℹ️  No verified leads to load\n');
     return { processed: 0, succeeded: 0, failed: 0 };
   }
 
-  console.log(`📊 Found ${verifiedLeads.length} verified leads ready for campaign (limit ${LOAD_LIMIT})\n`);
+  console.log(`📊 Found ${verifiedLeads.length} verified leads (limit ${LOAD_LIMIT})\n`);
 
   const execId = await createServiceExecution(db, {
     pipeline_run_id: runId,
     service_name: 'instantly',
     status: 'running',
-    input_count: verifiedLeads.length
+    input_count: verifiedLeads.length,
   });
 
   try {
     const { success, failed, successIds } = await instantlyAddLeads(verifiedLeads);
 
-    // Update statuses and last_contacted_at (only for actual successes)
     if (successIds.length > 0) {
       await batchUpdateLeadStatus(db, successIds, 'instantly_loaded');
       await db.query(
@@ -383,36 +382,50 @@ async function runLoadService(db: any, runId: string) {
       status: 'completed',
       completed_at: new Date(),
       output_count: success,
-      failed_count: failed
+      failed_count: failed,
     });
 
-    console.log(`\\n✅ Load complete: ${success} loaded, ${failed} failed\\n`);
-
+    console.log(`\n✅ Load complete: ${success} loaded, ${failed} failed\n`);
     return { processed: verifiedLeads.length, succeeded: success, failed };
-
   } catch (error: any) {
-    console.error(`\\n❌ Load failed: ${error.message}\\n`);
-
+    console.error(`\n❌ Load failed: ${error.message}\n`);
     await updateServiceExecution(db, execId, {
       status: 'failed',
       completed_at: new Date(),
-      error_message: error.message
+      error_message: error.message,
     });
-
     throw error;
   }
 }
 
-async function runFetchAndClassifyService(db: any, runId: string) {
-  const { min, max } = getFetchDateRange();
-  const dateLabel = process.env.FETCH_DATE_FROM && process.env.FETCH_DATE_TO
-    ? `${process.env.FETCH_DATE_FROM} → ${process.env.FETCH_DATE_TO}`
-    : process.env.FETCH_DATE || process.env.REPORT_DATE || 'today';
-  console.log(`\n📥 Fetch & Classify Service: Processing replies (${dateLabel}, ${min.slice(0, 10)} → ${max.slice(0, 10)})...\n`);
+// ── Fetch & Classify Service ───────────────────────────────────────
 
+interface FetchResult {
+  processed: number;
+  hot: number;
+  soft: number;
+  objection: number;
+  negative: number;
+  out_of_office: number;
+  auto_reply: number;
+  not_a_reply: number;
+  unreadCount?: number;
+  dateLabel: string;
+}
+
+async function runFetchAndClassifyService(db: any, runId: string): Promise<FetchResult> {
+  const { min, max } = getFetchDateRange();
+  const dateLabel =
+    process.env.FETCH_DATE_FROM && process.env.FETCH_DATE_TO
+      ? `${process.env.FETCH_DATE_FROM} → ${process.env.FETCH_DATE_TO}`
+      : process.env.FETCH_DATE || process.env.REPORT_DATE || 'today';
+
+  console.log(`\n📥 Fetch & Classify: Processing replies (${dateLabel})...\n`);
+
+  let unreadCount: number | undefined;
   try {
-    const unread = await instantlyGetUnreadCount();
-    console.log(`   📬 Unread count: ${unread}\n`);
+    unreadCount = await instantlyGetUnreadCount();
+    console.log(`   📬 Unread count: ${unreadCount}\n`);
   } catch {
     // Non-fatal
   }
@@ -420,7 +433,7 @@ async function runFetchAndClassifyService(db: any, runId: string) {
   const execId = await createServiceExecution(db, {
     pipeline_run_id: runId,
     service_name: 'instantly',
-    status: 'running'
+    status: 'running',
   });
 
   try {
@@ -431,43 +444,84 @@ async function runFetchAndClassifyService(db: any, runId: string) {
       await updateServiceExecution(db, execId, {
         status: 'completed',
         completed_at: new Date(),
-        output_count: 0
+        output_count: 0,
       });
-      return { processed: 0, hot: 0, soft: 0, objection: 0, negative: 0 };
+      return {
+        processed: 0,
+        hot: 0,
+        soft: 0,
+        objection: 0,
+        negative: 0,
+        out_of_office: 0,
+        auto_reply: 0,
+        not_a_reply: 0,
+        unreadCount,
+        dateLabel,
+      };
     }
 
     console.log(`📊 Found ${replies.length} replies\n`);
 
-    // Skip replies we've already auto-replied (avoid double reply)
+    // Filter out already-replied threads
     const threadIds = replies.map((r) => r.thread_id).filter(Boolean);
-    const alreadyRepliedRes = threadIds.length > 0
-      ? await db.query(
-          `SELECT thread_id FROM replies WHERE thread_id = ANY($1::text[]) AND replied_at IS NOT NULL`,
-          [threadIds]
-        )
-      : { rows: [] };
-    const alreadyReplied = new Set(alreadyRepliedRes.rows.map((r) => r.thread_id));
+    const alreadyRepliedRes =
+      threadIds.length > 0
+        ? await db.query(
+            `SELECT thread_id FROM replies WHERE thread_id = ANY($1::text[]) AND replied_at IS NOT NULL`,
+            [threadIds]
+          )
+        : { rows: [] };
+
+    const alreadyReplied = new Set(alreadyRepliedRes.rows.map((r: any) => r.thread_id));
     const toProcess = replies.filter((r) => !alreadyReplied.has(r.thread_id));
 
     if (alreadyReplied.size > 0) {
       console.log(`   ⏭️  Skipping ${alreadyReplied.size} already auto-replied\n`);
     }
+
     if (toProcess.length === 0) {
       console.log(`ℹ️  No new replies to process\n`);
-      await updateServiceExecution(db, execId, { status: 'completed', completed_at: new Date(), output_count: 0 });
-      return { processed: 0, hot: 0, soft: 0, objection: 0, negative: 0 };
+      await updateServiceExecution(db, execId, {
+        status: 'completed',
+        completed_at: new Date(),
+        output_count: 0,
+      });
+      return {
+        processed: 0,
+        hot: 0,
+        soft: 0,
+        objection: 0,
+        negative: 0,
+        out_of_office: 0,
+        auto_reply: 0,
+        not_a_reply: 0,
+        unreadCount,
+        dateLabel,
+      };
     }
 
-    let hot = 0, soft = 0, objection = 0, negative = 0;
+    let hot = 0,
+      soft = 0,
+      objection = 0,
+      negative = 0,
+      out_of_office = 0,
+      auto_reply = 0,
+      not_a_reply = 0;
 
     for (const reply of toProcess) {
       try {
-        const classification = await classifyReply(reply.body || '');
+        const subject = reply.subject || '';
+        const body = reply.body || '';
 
-        console.log(`   ${reply.from_email}: ${classification.category} (confidence: ${classification.confidence})`);
+        // Pre-filter: only classify real customer messages; tag OOO/auto without LLM
+        const nonReply = getNonReplyCategory(subject, body);
+        const classification: Classification = nonReply
+          ? { category: nonReply, confidence: 1 }
+          : await classifyReply(subject, body);
 
-        // Save to DB (schema: 006_replies_instantly_schema)
-        const bodySnippet = (reply.body || '').substring(0, 500);
+        console.log(`   ${reply.from_email}: ${classification.category} (${classification.confidence})`);
+
+        const bodySnippet = body.substring(0, 500);
         await db.query(
           `INSERT INTO replies 
            (from_email, subject, body_snippet, thread_id, reply_category, category_confidence, 
@@ -480,102 +534,130 @@ async function runFetchAndClassifyService(db: any, runId: string) {
              updated_at = NOW()`,
           [
             reply.from_email,
-            reply.subject || '',
+            subject,
             bodySnippet,
             reply.thread_id || `thread-${Date.now()}`,
             classification.category,
-            classification.confidence
+            classification.confidence,
           ]
         );
 
-        // Blacklist lead on negative reply (from_email = person who replied = our lead)
-        if (classification.category === 'negative') {
-          const leadRes = await db.query(
-            `SELECT id FROM leads WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1`,
-            [reply.from_email]
-          );
-          if (leadRes.rows.length > 0) {
-            await db.query(
-              `UPDATE leads SET blacklisted = true, blacklist_reason = 'negative_reply', updated_at = NOW() WHERE id = $1`,
-              [leadRes.rows[0].id]
-            );
-            console.log(`   ⛔ Blacklisted lead: ${reply.from_email}`);
-          }
+        switch (classification.category) {
+          case 'hot':
+            hot++;
+            await handleHotLead(db, reply);
+            break;
+          case 'soft':
+            soft++;
+            break;
+          case 'objection':
+            objection++;
+            break;
+          case 'negative':
+            negative++;
+            await blacklistLead(db, reply.from_email);
+            break;
+          case 'out_of_office':
+            out_of_office++;
+            break;
+          case 'auto_reply':
+            auto_reply++;
+            break;
+          case 'not_a_reply':
+            not_a_reply++;
+            break;
         }
-
-        // Send fixed template reply for hot leads (Design Pickle)
-        if (classification.category === 'hot') {
-          hot++;
-          if (reply.email_id && reply.eaccount) {
-            try {
-              const leadRes = await db.query(
-                `SELECT first_name FROM leads WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1`,
-                [reply.from_email]
-              );
-              const firstName = leadRes.rows[0]?.first_name?.trim() || '';
-              const { html, text } = buildHotReplyTemplate(firstName);
-              const subject = (reply.subject || '').startsWith('Re:') ? reply.subject : `Re: ${reply.subject || 'Your inquiry'}`;
-              await instantlyReplyToEmail({
-                reply_to_uuid: reply.email_id,
-                eaccount: reply.eaccount,
-                subject,
-                body_html: html,
-                body_text: text
-              });
-              await db.query(
-                `UPDATE replies SET replied_at = NOW(), updated_at = NOW() WHERE thread_id = $1`,
-                [reply.thread_id]
-              );
-              console.log(`   📤 Replied to hot lead: ${reply.from_email}`);
-              await new Promise((r) => setTimeout(r, 300));
-            } catch (err: any) {
-              console.error(`   ❌ Reply failed for ${reply.from_email}: ${err.message}`);
-            }
-          } else {
-            console.log(`   ⚠️  Skip reply (missing email_id/eaccount): ${reply.from_email}`);
-          }
-        } else if (classification.category === 'soft') soft++;
-        else if (classification.category === 'objection') objection++;
-        else negative++;
-
       } catch (error: any) {
-        console.error(`   ❌ Error processing reply from ${reply.from_email}: ${error.message}`);
+        console.error(`   ❌ Error processing ${reply.from_email}: ${error.message}`);
       }
 
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await sleep(RATE_LIMITS.INSTANTLY_DELAY_MS);
     }
 
     await updateServiceExecution(db, execId, {
       status: 'completed',
       completed_at: new Date(),
-      output_count: toProcess.length
+      output_count: toProcess.length,
     });
 
-    console.log(`\n✅ Classification complete:\n`);
-    console.log(`   Hot: ${hot}`);
-    console.log(`   Soft: ${soft}`);
-    console.log(`   Objection: ${objection}`);
-    console.log(`   Negative: ${negative}\\n`);
+    console.log(`\n✅ Classification complete:`);
+    console.log(
+      `   Customer replies: Hot ${hot}, Soft ${soft}, Objection ${objection}, Negative ${negative}`
+    );
+    console.log(`   Not customer reply: Out of office ${out_of_office}, Auto-reply ${auto_reply}, Not a reply ${not_a_reply}\n`);
 
-    return { processed: toProcess.length, hot, soft, objection, negative };
-
+    return {
+      processed: toProcess.length,
+      hot,
+      soft,
+      objection,
+      negative,
+      out_of_office,
+      auto_reply,
+      not_a_reply,
+      unreadCount,
+      dateLabel,
+    };
   } catch (error: any) {
-    console.error(`\\n❌ Fetch & classify failed: ${error.message}\\n`);
-
+    console.error(`\n❌ Fetch & classify failed: ${error.message}\n`);
     await updateServiceExecution(db, execId, {
       status: 'failed',
       completed_at: new Date(),
-      error_message: error.message
+      error_message: error.message,
     });
-
     throw error;
   }
 }
 
-// ── Main Service ───────────────────────────────────────────────────
+async function handleHotLead(db: any, reply: Reply): Promise<void> {
+  if (!reply.email_id || !reply.eaccount) {
+    console.log(`   ⚠️  Skip reply (missing email_id/eaccount): ${reply.from_email}`);
+    return;
+  }
 
-async function main() {
-  console.log(`\\n🚀 Instantly Service Starting (MODE: ${MODE})\\n`);
+  try {
+    const leadRes = await db.query(
+      `SELECT first_name FROM leads WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1`,
+      [reply.from_email]
+    );
+    const firstName = leadRes.rows[0]?.first_name?.trim() || '';
+    const { html, text } = buildHotReplyTemplate(firstName);
+    const subject = reply.subject?.startsWith('Re:') ? reply.subject : `Re: ${reply.subject || 'Your inquiry'}`;
+
+    await instantlyReplyToEmail({
+      reply_to_uuid: reply.email_id,
+      eaccount: reply.eaccount,
+      subject,
+      body_html: html,
+      body_text: text,
+    });
+
+    await db.query(`UPDATE replies SET replied_at = NOW(), updated_at = NOW() WHERE thread_id = $1`, [reply.thread_id]);
+    console.log(`   📤 Replied to hot lead: ${reply.from_email}`);
+    await sleep(300);
+  } catch (err: any) {
+    console.error(`   ❌ Reply failed for ${reply.from_email}: ${err.message}`);
+  }
+}
+
+async function blacklistLead(db: any, email: string): Promise<void> {
+  const leadRes = await db.query(`SELECT id FROM leads WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1`, [email]);
+
+  if (leadRes.rows.length > 0) {
+    await db.query(
+      `UPDATE leads SET blacklisted = true, blacklist_reason = 'negative_reply', updated_at = NOW() WHERE id = $1`,
+      [leadRes.rows[0].id]
+    );
+    console.log(`   ⛔ Blacklisted lead: ${email}`);
+  }
+}
+
+// ── Main ───────────────────────────────────────────────────────────
+
+async function main(): Promise<void> {
+  validateEnv();
+
+  console.log(`\n🚀 Instantly Service Starting (MODE: ${MODE})\n`);
 
   const db = getDb();
   if (!db) {
@@ -585,23 +667,27 @@ async function main() {
 
   const runId = await createPipelineRun(db, {
     run_type: `instantly_${MODE}`,
-    triggered_by: 'manual'
+    triggered_by: 'manual',
   });
 
   try {
-    let totalProcessed = 0, totalSucceeded = 0, totalFailed = 0;
+    let totalProcessed = 0,
+      totalSucceeded = 0,
+      totalFailed = 0;
+    let fetchResult: FetchResult | null = null;
 
     if (MODE === 'load' || MODE === 'all') {
-      const loadResult = await runLoadService(db, runId);
-      totalProcessed += loadResult.processed;
-      totalSucceeded += loadResult.succeeded;
-      totalFailed += loadResult.failed;
+      const result = await runLoadService(db, runId);
+      totalProcessed += result.processed;
+      totalSucceeded += result.succeeded;
+      totalFailed += result.failed;
     }
 
-    if (MODE === 'fetch' || MODE === 'classify' || MODE === 'all') {
-      const fetchResult = await runFetchAndClassifyService(db, runId);
-      totalProcessed += fetchResult.processed;
-      totalSucceeded += fetchResult.processed;
+    if (MODE === 'fetch' || MODE === 'all') {
+      const result = await runFetchAndClassifyService(db, runId);
+      fetchResult = result;
+      totalProcessed += result.processed;
+      totalSucceeded += result.processed;
     }
 
     await updatePipelineRun(db, runId, {
@@ -609,18 +695,37 @@ async function main() {
       completed_at: new Date(),
       leads_processed: totalProcessed,
       leads_succeeded: totalSucceeded,
-      leads_failed: totalFailed
+      leads_failed: totalFailed,
     });
 
-    console.log(`✅ Instantly Service Complete\\n`);
+    // Post Process Replies report to Slack (template, not AI message)
+    if (fetchResult && process.env.SLACK_REPORT_CHANNEL) {
+      const dateForReport =
+        process.env.FETCH_DATE || process.env.REPORT_DATE || new Date().toISOString().split('T')[0];
+      const msg = buildProcessRepliesMessage({
+        date: dateForReport,
+        unreadCount: fetchResult.unreadCount,
+        repliesFetched: fetchResult.processed,
+        hot: fetchResult.hot,
+        soft: fetchResult.soft,
+        objection: fetchResult.objection,
+        negative: fetchResult.negative,
+        outOfOffice: fetchResult.out_of_office,
+        autoReply: fetchResult.auto_reply,
+        notAReply: fetchResult.not_a_reply,
+        autoReplied: fetchResult.hot,
+      });
+      await postToReportChannel(msg);
+    }
 
+    console.log(`✅ Instantly Service Complete\n`);
   } catch (error: any) {
-    console.error(`\\n❌ Instantly Service Failed: ${error.message}\\n`);
+    console.error(`\n❌ Instantly Service Failed: ${error.message}\n`);
 
     await updatePipelineRun(db, runId, {
       status: 'failed',
       completed_at: new Date(),
-      error_message: error.message
+      error_message: error.message,
     });
 
     process.exit(1);

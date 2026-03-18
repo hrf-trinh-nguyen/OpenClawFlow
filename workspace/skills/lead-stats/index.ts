@@ -12,27 +12,28 @@
  */
 
 import { getDb } from '../../lib/supabase-pipeline.js';
+import { validateRequiredEnv, truncate } from '../../lib/utils.js';
+import { LEAD_STATUSES } from '../../lib/constants.js';
 
-const VALID_STATUSES = [
-  'new',
-  'apollo_matched',
-  'bouncer_verified',
-  'instantly_loaded',
-  'replied',
-  'failed'
-] as const;
+function detectFailureStep(reason: string): string {
+  if (reason.includes('Bouncer') || reason.includes('deliverable')) return 'Bouncer';
+  if (reason.includes('Apollo')) return 'Apollo';
+  if (reason.includes('Instantly')) return 'Instantly';
+  return '?';
+}
 
 async function main() {
+  validateRequiredEnv(['SUPABASE_DB_URL']);
+
   const db = getDb();
   if (!db) {
-    console.error('❌ SUPABASE_DB_URL not found in env');
+    console.error('❌ Failed to connect to database');
     process.exit(1);
   }
 
   console.log('\n📊 Lead pipeline statistics\n');
 
   try {
-    // Count by processing_status
     const statusRes = await db.query(
       `SELECT processing_status::text, COUNT(*) as count
        FROM leads
@@ -49,7 +50,6 @@ async function main() {
     }
     console.log(`  TOTAL: ${total}\n`);
 
-    // For failed: group by processing_error
     const failedRes = await db.query(
       `SELECT COALESCE(processing_error, '(no error message)') as reason, COUNT(*) as count
        FROM leads
@@ -62,9 +62,9 @@ async function main() {
       console.log('── Failed leads by reason (processing_error) ──');
       console.log('   (Most failures are at Bouncer step: email verify)');
       for (const row of failedRes.rows) {
-        const reason = (row.reason || '(no error message)').slice(0, 80);
-        const step = reason.includes('Bouncer') || reason.includes('deliverable') ? 'Bouncer' : reason.includes('Apollo') ? 'Apollo' : reason.includes('Instantly') ? 'Instantly' : '?';
-        console.log(`  ${row.count}: [${step}] ${reason}${reason.length >= 80 ? '...' : ''}`);
+        const reason = row.reason || '(no error message)';
+        const step = detectFailureStep(reason);
+        console.log(`  ${row.count}: [${step}] ${truncate(reason, 80)}`);
       }
       console.log('');
     }

@@ -4,7 +4,7 @@
     {
       "id": "d66c8bed-6c9c-4100-93d6-590409600cea",
       "name": "3AM-5AM PT - Build List (Batched)",
-      "enabled": true,
+      "enabled": false,
       "createdAtMs": 1772788600592,
       "updatedAtMs": 1773656167796,
       "schedule": {
@@ -38,7 +38,7 @@
     {
       "id": "0d6eb890-7f8e-47a2-95d7-b50d268ff950",
       "name": "5:15AM & 5:45AM PT - Load Campaign (Batched)",
-      "enabled": true,
+      "enabled": false,
       "createdAtMs": 1772788601690,
       "updatedAtMs": 1773656167815,
       "schedule": {
