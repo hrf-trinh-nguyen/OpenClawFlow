@@ -335,19 +335,31 @@ var HOT_SIGNAL_PHRASES = [
 
 // lib/slack-templates.ts
 function buildProcessRepliesMessage(p) {
+  const totalClassified = p.hot + p.soft + p.objection + p.negative + (p.outOfOffice ?? 0) + (p.autoReply ?? 0) + (p.notAReply ?? 0);
+  const customerTotal = p.hot + p.soft + p.objection + p.negative;
+  const notCustomer = (p.outOfOffice ?? 0) + (p.autoReply ?? 0) + (p.notAReply ?? 0);
   const lines = [
     `\u{1F4EC} *Process Replies Report*`,
-    `Date: ${p.date}`,
-    `\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`,
-    `Replies fetched: ${p.repliesFetched}`,
-    `*Customer reply (classified):* Hot ${p.hot}  |  Soft ${p.soft}  |  Objection ${p.objection}  |  Negative ${p.negative}`,
-    `*Not customer reply:* Out of office ${p.outOfOffice ?? 0}  |  Auto-reply ${p.autoReply ?? 0}  |  Not a reply ${p.notAReply ?? 0}`,
-    `Auto-replied (hot): ${p.autoReplied}`
+    `Date: ${p.date}${p.runAtPT ? `  \xB7  Run: ${p.runAtPT}` : ""}${p.durationSec !== void 0 ? `  \xB7  ${p.durationSec}s` : ""}`,
+    `\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550`,
+    ``,
+    `*Inbox*`,
+    `\u2022 Unread (API): ${p.unreadCount ?? "\u2014"}`,
+    `\u2022 Fetched this run: ${p.repliesFetched}`,
+    `\u2022 Total classified: ${totalClassified}`,
+    ``,
+    `*Customer reply (classified)*`,
+    `\u2022 Hot: ${p.hot}  \xB7  Soft: ${p.soft}  \xB7  Objection: ${p.objection}  \xB7  Negative: ${p.negative}`,
+    `\u2022 Subtotal: ${customerTotal}`,
+    ``,
+    `*Not customer reply*`,
+    `\u2022 Out of office: ${p.outOfOffice ?? 0}  \xB7  Auto-reply: ${p.autoReply ?? 0}  \xB7  Not a reply: ${p.notAReply ?? 0}`,
+    `\u2022 Subtotal: ${notCustomer}`,
+    ``,
+    `*Actions*`,
+    `\u2022 Auto-replied (hot): ${p.autoReplied}`,
+    `\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550`
   ];
-  if (p.unreadCount !== void 0) {
-    lines.splice(3, 0, `Inbox unread: ${p.unreadCount}`);
-  }
-  lines.push(`\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`);
   return lines.join("\n");
 }
 async function postSlackMessage(channel, text) {
@@ -875,6 +887,7 @@ async function main() {
   try {
     let totalProcessed = 0, totalSucceeded = 0, totalFailed = 0;
     let fetchResult = null;
+    let fetchStartMs = Date.now();
     if (MODE === "load" || MODE === "all") {
       const result = await runLoadService(db, runId);
       totalProcessed += result.processed;
@@ -882,6 +895,7 @@ async function main() {
       totalFailed += result.failed;
     }
     if (MODE === "fetch" || MODE === "all") {
+      fetchStartMs = Date.now();
       const result = await runFetchAndClassifyService(db, runId);
       fetchResult = result;
       totalProcessed += result.processed;
@@ -896,6 +910,14 @@ async function main() {
     });
     if (fetchResult && process.env.SLACK_REPORT_CHANNEL) {
       const dateForReport = process.env.FETCH_DATE || process.env.REPORT_DATE || (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+      const durationSec = Math.round((Date.now() - fetchStartMs) / 1e3);
+      const runAtPT = (/* @__PURE__ */ new Date()).toLocaleString("en-US", {
+        timeZone: "America/Los_Angeles",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit"
+      }) + " PT";
       const msg = buildProcessRepliesMessage({
         date: dateForReport,
         unreadCount: fetchResult.unreadCount,
@@ -907,7 +929,9 @@ async function main() {
         outOfOffice: fetchResult.out_of_office,
         autoReply: fetchResult.auto_reply,
         notAReply: fetchResult.not_a_reply,
-        autoReplied: fetchResult.hot
+        autoReplied: fetchResult.hot,
+        runAtPT,
+        durationSec
       });
       await postToReportChannel(msg);
     }

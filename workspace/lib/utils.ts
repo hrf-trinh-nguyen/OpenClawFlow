@@ -62,8 +62,17 @@ export function parseIntSafe(value: string | undefined, fallback: number): numbe
 
 // ── Date Utilities ──────────────────────────────────────────────────
 
+const REPORT_TIMEZONE = 'America/Los_Angeles';
+
+/** Today's date in PT (America/Los_Angeles), YYYY-MM-DD. Use for report date, daily caps, etc. */
 export function getTodayDateString(): string {
-  return new Date().toISOString().split('T')[0];
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: REPORT_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  return formatter.format(new Date());
 }
 
 export function getDateRange(
@@ -88,9 +97,11 @@ export function getDateRange(
     return { min: dayStart.toISOString(), max: dayEnd.toISOString() };
   }
 
-  const now = new Date();
-  const localStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const localEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  // Default: today in PT (boundaries depend on TZ=America/Los_Angeles when running)
+  const todayPT = getTodayDateString();
+  const [y, m, d] = todayPT.split('-').map(Number);
+  const localStart = new Date(y, (m || 1) - 1, d || 1);
+  const localEnd = new Date(y, (m || 1) - 1, (d || 1) + 1);
   return { min: localStart.toISOString(), max: localEnd.toISOString() };
 }
 

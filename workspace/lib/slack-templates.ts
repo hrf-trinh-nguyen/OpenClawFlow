@@ -17,24 +17,41 @@ export interface ProcessRepliesParams {
   autoReply?: number;
   notAReply?: number;
   autoReplied: number;
+  /** Run time in PT e.g. "Mar 19, 2:15 PM PT" */
+  runAtPT?: string;
+  /** Duration in seconds */
+  durationSec?: number;
 }
 
 export function buildProcessRepliesMessage(p: ProcessRepliesParams): string {
+  const totalClassified =
+    p.hot + p.soft + p.objection + p.negative + (p.outOfOffice ?? 0) + (p.autoReply ?? 0) + (p.notAReply ?? 0);
+  const customerTotal = p.hot + p.soft + p.objection + p.negative;
+  const notCustomer = (p.outOfOffice ?? 0) + (p.autoReply ?? 0) + (p.notAReply ?? 0);
+
   const lines = [
     `📬 *Process Replies Report*`,
-    `Date: ${p.date}`,
-    `─────────────────────────`,
-    `Replies fetched: ${p.repliesFetched}`,
-    `*Customer reply (classified):* Hot ${p.hot}  |  Soft ${p.soft}  |  Objection ${p.objection}  |  Negative ${p.negative}`,
-    `*Not customer reply:* Out of office ${p.outOfOffice ?? 0}  |  Auto-reply ${p.autoReply ?? 0}  |  Not a reply ${p.notAReply ?? 0}`,
-    `Auto-replied (hot): ${p.autoReplied}`,
+    `Date: ${p.date}${p.runAtPT ? `  ·  Run: ${p.runAtPT}` : ''}${p.durationSec !== undefined ? `  ·  ${p.durationSec}s` : ''}`,
+    `═════════════════════════`,
+    ``,
+    `*Inbox*`,
+    `• Unread (API): ${p.unreadCount ?? '—'}`,
+    `• Fetched this run: ${p.repliesFetched}`,
+    `• Total classified: ${totalClassified}`,
+    ``,
+    `*Customer reply (classified)*`,
+    `• Hot: ${p.hot}  ·  Soft: ${p.soft}  ·  Objection: ${p.objection}  ·  Negative: ${p.negative}`,
+    `• Subtotal: ${customerTotal}`,
+    ``,
+    `*Not customer reply*`,
+    `• Out of office: ${p.outOfOffice ?? 0}  ·  Auto-reply: ${p.autoReply ?? 0}  ·  Not a reply: ${p.notAReply ?? 0}`,
+    `• Subtotal: ${notCustomer}`,
+    ``,
+    `*Actions*`,
+    `• Auto-replied (hot): ${p.autoReplied}`,
+    `═════════════════════════`,
   ];
 
-  if (p.unreadCount !== undefined) {
-    lines.splice(3, 0, `Inbox unread: ${p.unreadCount}`);
-  }
-
-  lines.push(`─────────────────────────`);
   return lines.join('\n');
 }
 
@@ -43,6 +60,8 @@ export function buildProcessRepliesMessage(p: ProcessRepliesParams): string {
 export interface DailyReportParams {
   reportDate: string;
   campaignIdShort?: string;
+  /** Report generated at (PT) e.g. "Mar 19, 10:00 PM PT" */
+  reportRunAtPT?: string;
   personIdsCount: number;
   leadsPulled: number;
   leadsValidated: number;
@@ -56,6 +75,11 @@ export interface DailyReportParams {
   openRatePct: string;
   repliesInst: number;
   replyRatePct: string;
+  /** Optional: contacted, new leads contacted, clicks from Instantly API */
+  contacted?: number;
+  newLeadsContacted?: number;
+  clicks?: number;
+  uniqueClicks?: number;
   repliesFetched: number;
   hotCount: number;
   softCount: number;
@@ -68,39 +92,47 @@ export interface DailyReportParams {
 }
 
 export function buildDailyReportMessage(p: DailyReportParams): string {
+  const customerTotal = p.hotCount + p.softCount + p.objectionCount + p.negativeCount;
+  const notCustomer = (p.outOfOfficeCount ?? 0) + (p.autoReplyCount ?? 0) + (p.notAReplyCount ?? 0);
+  const totalClassified = p.repliesFetched;
+
   const lines = [
     `📊 *OpenClaw Daily Report*`,
-    `Date: ${p.reportDate}${p.campaignIdShort ? `  |  Campaign: ${p.campaignIdShort}` : ''}`,
+    `Date: ${p.reportDate}${p.campaignIdShort ? `  ·  Campaign: ${p.campaignIdShort}` : ''}${p.reportRunAtPT ? `  ·  Generated: ${p.reportRunAtPT}` : ''}`,
     `═════════════════════════`,
     ``,
     `*Lead Pipeline*`,
     `• Apollo IDs found: ${p.personIdsCount}`,
     `• Leads with email: ${p.leadsPulled}`,
-    `• Bouncer verified: ${p.leadsValidated} (${p.deliverableRatePct} deliverable)`,
-    `• Removed: ${p.leadsRemoved} (bounce ${p.bounceRatePct})`,
-    `• Pushed to Instantly: ${p.pushedOk} ok / ${p.pushedFailed} failed`,
+    `• Bouncer verified: ${p.leadsValidated} (deliverable ${p.deliverableRatePct})`,
+    `• Removed (bounce): ${p.leadsRemoved} (${p.bounceRatePct})`,
+    `• Pushed to Instantly: ${p.pushedOk} ok  ·  ${p.pushedFailed} failed`,
     ``,
     `*Campaign (Instantly)*`,
     `• Emails sent: ${p.sent}`,
     `• Opens: ${p.opened} (${p.openRatePct})`,
-    `• Replies: ${p.repliesInst} (${p.replyRatePct})`,
+    `• Replies (inbox): ${p.repliesInst} (${p.replyRatePct})`,
   ];
 
-  if (p.repliesFetched > 0) {
-    lines.push(
-      ``,
-      `*Reply Classification (customer reply only)*`,
-      `• Hot: ${p.hotCount}  |  Soft: ${p.softCount}  |  Objection: ${p.objectionCount}  |  Negative: ${p.negativeCount} (${p.negativeRatePct})`
-    );
-    const ooo = p.outOfOfficeCount ?? 0;
-    const ar = p.autoReplyCount ?? 0;
-    const nar = p.notAReplyCount ?? 0;
-    if (ooo + ar + nar > 0) {
-      lines.push(`• Not customer reply: Out of office ${ooo}  |  Auto-reply ${ar}  |  Not a reply ${nar}`);
-    }
+  if (p.contacted !== undefined && p.contacted > 0) {
+    lines.push(`• Contacted: ${p.contacted}${p.newLeadsContacted !== undefined && p.newLeadsContacted > 0 ? `  ·  New leads contacted: ${p.newLeadsContacted}` : ''}`);
+  }
+  if (p.clicks !== undefined && (p.clicks > 0 || (p.uniqueClicks ?? 0) > 0)) {
+    lines.push(`• Clicks: ${p.uniqueClicks ?? p.clicks} unique${p.clicks !== p.uniqueClicks && p.clicks > 0 ? ` (${p.clicks} total)` : ''}`);
   }
 
-  lines.push(``, `═════════════════════════`);
+  lines.push(
+    ``,
+    `*Reply Classification (DB · ${p.reportDate})*`,
+    `• Customer: Hot ${p.hotCount}  ·  Soft ${p.softCount}  ·  Objection ${p.objectionCount}  ·  Negative ${p.negativeCount} (${p.negativeRatePct})`,
+    `• Customer subtotal: ${customerTotal}`,
+    `• Not customer: Out of office ${p.outOfOfficeCount ?? 0}  ·  Auto-reply ${p.autoReplyCount ?? 0}  ·  Not a reply ${p.notAReplyCount ?? 0}`,
+    `• Not customer subtotal: ${notCustomer}`,
+    `• Total classified: ${totalClassified}`,
+    ``,
+    `═════════════════════════`
+  );
+
   return lines.join('\n');
 }
 

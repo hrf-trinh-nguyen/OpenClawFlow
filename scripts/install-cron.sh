@@ -13,8 +13,16 @@ INSTALLED=$(sed "s|/home/deploy/openclaw-mvp|$REPO_ROOT|g" "$CRON_FILE")
 echo "Installing crontab for user $(whoami)..."
 echo "$INSTALLED" | crontab -
 
+echo ""
 echo "Current crontab:"
 crontab -l
 
 echo ""
-echo "Done. Logs: $REPO_ROOT/logs/build-list.log, $REPO_ROOT/logs/load-campaign.log"
+echo "Done. All 4 jobs installed:"
+echo "  - Build list:       5:00 AM PT   → logs/build-list.log"
+echo "  - Load campaign:    5:30 AM PT   → logs/load-campaign.log"
+echo "  - Process replies:  10AM–9PM PT  → logs/process-replies.log"
+echo "  - Daily report:     10:00 PM PT  → logs/daily-report.log"
+echo ""
+echo "Verify: crontab -l"
+echo "Logs:   tail -f $REPO_ROOT/logs/*.log"

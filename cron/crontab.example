@@ -1,11 +1,26 @@
 # OpenClaw pipeline — Pacific Time (America/Los_Angeles)
 # Install: ./scripts/install-cron.sh  (from repo root, as deploy user)
 #
-# Build list: 3:00, 4:00, 5:00 AM PT
-# Load campaign: 5:15, 5:45 AM PT
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ Schedule (all times PT = America/Los_Angeles)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Build list:       5:00 AM PT (Apollo + Bouncer)
+# │ Load campaign:    5:30 AM PT (push verified leads to Instantly)
+# │ Process replies:  10AM–9PM PT hourly (fetch & classify inbox)
+# │ Daily report:     10:00 PM PT (aggregate metrics, send Slack)
+# └─────────────────────────────────────────────────────────────────────────────
 
 TZ=America/Los_Angeles
 OPENCLAW_REPO=/home/deploy/openclaw-mvp
 
-0 3,4,5 * * * OPENCLAW_HOME=$OPENCLAW_REPO $OPENCLAW_REPO/scripts/run-build-list.sh >> $OPENCLAW_REPO/logs/build-list.log 2>&1
-15,45 5 * * * OPENCLAW_HOME=$OPENCLAW_REPO $OPENCLAW_REPO/scripts/run-load-campaign.sh >> $OPENCLAW_REPO/logs/load-campaign.log 2>&1
+# ── Build List: 5:00 AM PT ────────────────────────────────────────────────────
+0 5 * * * OPENCLAW_HOME=$OPENCLAW_REPO $OPENCLAW_REPO/scripts/run-build-list.sh >> $OPENCLAW_REPO/logs/build-list.log 2>&1
+
+# ── Load Campaign: 5:30 AM PT ─────────────────────────────────────────────────
+30 5 * * * OPENCLAW_HOME=$OPENCLAW_REPO $OPENCLAW_REPO/scripts/run-load-campaign.sh >> $OPENCLAW_REPO/logs/load-campaign.log 2>&1
+
+# ── Process Replies: 10AM–9PM PT (hourly) ─────────────────────────────────────
+0 10-21 * * * OPENCLAW_HOME=$OPENCLAW_REPO $OPENCLAW_REPO/scripts/run-process-replies.sh >> $OPENCLAW_REPO/logs/process-replies.log 2>&1
+
+# ── Daily Report: 10:00 PM PT ─────────────────────────────────────────────────
+0 22 * * * OPENCLAW_HOME=$OPENCLAW_REPO $OPENCLAW_REPO/scripts/run-daily-report.sh >> $OPENCLAW_REPO/logs/daily-report.log 2>&1

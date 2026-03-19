@@ -4,6 +4,7 @@
   "description": "OpenClaw outbound automation with Supabase persistence",
   "type": "module",
   "dependencies": {
+    "csv-parse": "^5.5.0",
     "pg": "^8.11.3"
   },
   "devDependencies": {

@@ -72,7 +72,7 @@
     {
       "id": "f1a2b3c4-d5e6-7890-a1b2-c3d4e5f6a7b8",
       "name": "10AM–9PM PT - Process Replies (Hourly)",
-      "enabled": true,
+      "enabled": false,
       "createdAtMs": 1773200000000,
       "updatedAtMs": 1773200000000,
       "schedule": {
@@ -98,7 +98,7 @@
     {
       "id": "82262b9e-6e42-447f-9e7a-c416015500fb",
       "name": "10PM PT - Daily Report",
-      "enabled": true,
+      "enabled": false,
       "createdAtMs": 1772788603877,
       "updatedAtMs": 1773656167769,
       "schedule": {

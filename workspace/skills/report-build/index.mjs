@@ -290,37 +290,43 @@ var CLASSIFICATION_MODEL = process.env.REPLY_CLASSIFICATION_MODEL || "gpt-4o";
 
 // lib/slack-templates.ts
 function buildDailyReportMessage(p) {
+  const customerTotal = p.hotCount + p.softCount + p.objectionCount + p.negativeCount;
+  const notCustomer = (p.outOfOfficeCount ?? 0) + (p.autoReplyCount ?? 0) + (p.notAReplyCount ?? 0);
+  const totalClassified = p.repliesFetched;
   const lines = [
     `\u{1F4CA} *OpenClaw Daily Report*`,
-    `Date: ${p.reportDate}${p.campaignIdShort ? `  |  Campaign: ${p.campaignIdShort}` : ""}`,
+    `Date: ${p.reportDate}${p.campaignIdShort ? `  \xB7  Campaign: ${p.campaignIdShort}` : ""}${p.reportRunAtPT ? `  \xB7  Generated: ${p.reportRunAtPT}` : ""}`,
     `\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550`,
     ``,
     `*Lead Pipeline*`,
     `\u2022 Apollo IDs found: ${p.personIdsCount}`,
     `\u2022 Leads with email: ${p.leadsPulled}`,
-    `\u2022 Bouncer verified: ${p.leadsValidated} (${p.deliverableRatePct} deliverable)`,
-    `\u2022 Removed: ${p.leadsRemoved} (bounce ${p.bounceRatePct})`,
-    `\u2022 Pushed to Instantly: ${p.pushedOk} ok / ${p.pushedFailed} failed`,
+    `\u2022 Bouncer verified: ${p.leadsValidated} (deliverable ${p.deliverableRatePct})`,
+    `\u2022 Removed (bounce): ${p.leadsRemoved} (${p.bounceRatePct})`,
+    `\u2022 Pushed to Instantly: ${p.pushedOk} ok  \xB7  ${p.pushedFailed} failed`,
     ``,
     `*Campaign (Instantly)*`,
     `\u2022 Emails sent: ${p.sent}`,
     `\u2022 Opens: ${p.opened} (${p.openRatePct})`,
-    `\u2022 Replies: ${p.repliesInst} (${p.replyRatePct})`
+    `\u2022 Replies (inbox): ${p.repliesInst} (${p.replyRatePct})`
   ];
-  if (p.repliesFetched > 0) {
-    lines.push(
-      ``,
-      `*Reply Classification (customer reply only)*`,
-      `\u2022 Hot: ${p.hotCount}  |  Soft: ${p.softCount}  |  Objection: ${p.objectionCount}  |  Negative: ${p.negativeCount} (${p.negativeRatePct})`
-    );
-    const ooo = p.outOfOfficeCount ?? 0;
-    const ar = p.autoReplyCount ?? 0;
-    const nar = p.notAReplyCount ?? 0;
-    if (ooo + ar + nar > 0) {
-      lines.push(`\u2022 Not customer reply: Out of office ${ooo}  |  Auto-reply ${ar}  |  Not a reply ${nar}`);
-    }
+  if (p.contacted !== void 0 && p.contacted > 0) {
+    lines.push(`\u2022 Contacted: ${p.contacted}${p.newLeadsContacted !== void 0 && p.newLeadsContacted > 0 ? `  \xB7  New leads contacted: ${p.newLeadsContacted}` : ""}`);
   }
-  lines.push(``, `\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550`);
+  if (p.clicks !== void 0 && (p.clicks > 0 || (p.uniqueClicks ?? 0) > 0)) {
+    lines.push(`\u2022 Clicks: ${p.uniqueClicks ?? p.clicks} unique${p.clicks !== p.uniqueClicks && p.clicks > 0 ? ` (${p.clicks} total)` : ""}`);
+  }
+  lines.push(
+    ``,
+    `*Reply Classification (DB \xB7 ${p.reportDate})*`,
+    `\u2022 Customer: Hot ${p.hotCount}  \xB7  Soft ${p.softCount}  \xB7  Objection ${p.objectionCount}  \xB7  Negative ${p.negativeCount} (${p.negativeRatePct})`,
+    `\u2022 Customer subtotal: ${customerTotal}`,
+    `\u2022 Not customer: Out of office ${p.outOfOfficeCount ?? 0}  \xB7  Auto-reply ${p.autoReplyCount ?? 0}  \xB7  Not a reply ${p.notAReplyCount ?? 0}`,
+    `\u2022 Not customer subtotal: ${notCustomer}`,
+    `\u2022 Total classified: ${totalClassified}`,
+    ``,
+    `\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550`
+  );
   return lines.join("\n");
 }
 
@@ -367,6 +373,7 @@ async function main() {
   const campaignIds = getCampaignIds();
   let primaryCampaignId = null;
   let sent = 0, opened = 0, repliesInst = 0;
+  let contacted = 0, newLeadsContacted = 0, clicks = 0, uniqueClicks = 0;
   for (const cid of campaignIds) {
     const row = await fetchInstantlyDailyAnalytics(reportDate, cid);
     if (!row) continue;
@@ -388,6 +395,10 @@ async function main() {
       sent = row.sent ?? 0;
       opened = row.unique_opened ?? row.opened ?? 0;
       repliesInst = row.unique_replies ?? row.replies ?? 0;
+      contacted = row.contacted ?? 0;
+      newLeadsContacted = row.new_leads_contacted ?? 0;
+      clicks = row.clicks ?? 0;
+      uniqueClicks = row.unique_clicks ?? 0;
     }
   }
   const person_ids_count = metrics.person_ids_count ?? 0;
@@ -438,9 +449,17 @@ async function main() {
       negative_rate: `${nr.toFixed(2)}%`
     }
   };
+  const reportRunAtPT = (/* @__PURE__ */ new Date()).toLocaleString("en-US", {
+    timeZone: "America/Los_Angeles",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }) + " PT";
   const text = buildDailyReportMessage({
     reportDate,
     campaignIdShort: primaryCampaignId ? `${primaryCampaignId.slice(0, 8)}...` : void 0,
+    reportRunAtPT,
     personIdsCount: person_ids_count,
     leadsPulled: leads_pulled,
     leadsValidated: leads_validated,
@@ -454,6 +473,10 @@ async function main() {
     openRatePct: `${openRatePct}%`,
     repliesInst,
     replyRatePct: `${replyRatePct}%`,
+    contacted: contacted > 0 ? contacted : void 0,
+    newLeadsContacted: newLeadsContacted > 0 ? newLeadsContacted : void 0,
+    clicks: clicks > 0 ? clicks : void 0,
+    uniqueClicks: uniqueClicks > 0 ? uniqueClicks : void 0,
     repliesFetched: replies_fetched,
     hotCount: hot_count,
     softCount: soft_count,

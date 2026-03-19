@@ -13,11 +13,14 @@ export default defineConfig({
     'skills/lead-stats/index':     'skills/lead-stats/index.ts',
     'skills/lead-move/index':      'skills/lead-move/index.ts',
     'skills/lead-delete/index':    'skills/lead-delete/index.ts',
+    'skills/csv-import/index':     'skills/csv-import/index.ts',
     // Shared libraries
     'lib/supabase-pipeline': 'lib/supabase-pipeline.ts',
     'lib/supabase-legacy':   'lib/supabase-legacy.ts',
     // Scripts
     'scripts/monthly-report': 'scripts/monthly-report.ts',
+    'scripts/csv-import':     'scripts/csv-import.ts',
+    'scripts/test-report-slack': 'scripts/test-report-slack.ts',
   },
   format: ['esm'],
   outExtension: () => ({ js: '.mjs' }),

@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 # Common functions for OpenClaw shell scripts
+# All times and "today" are in Pacific (America/Los_Angeles).
+
+# Ensure PT for cron and manual runs (crontab also sets TZ; this covers scripts run by hand)
+export TZ="${TZ:-America/Los_Angeles}"
 
 # ── Environment Setup ────────────────────────────────────────────────
 
@@ -136,6 +140,11 @@ try {
   console.log(r.rows[0]?.c ?? 0);
 } catch { console.log('0'); } finally { await pool.end(); }
 EOF
+}
+
+# Current time in Pacific (for Slack report accuracy)
+get_pt_timestamp() {
+  TZ=America/Los_Angeles date '+%b %d, %I:%M %p PT'
 }
 
 # Apollo runs/day guard (based on local state file, PT)

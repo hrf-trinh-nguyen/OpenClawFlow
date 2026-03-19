@@ -694,6 +694,7 @@ async function main(): Promise<void> {
       totalSucceeded = 0,
       totalFailed = 0;
     let fetchResult: FetchResult | null = null;
+    let fetchStartMs = Date.now();
 
     if (MODE === 'load' || MODE === 'all') {
       const result = await runLoadService(db, runId);
@@ -703,6 +704,7 @@ async function main(): Promise<void> {
     }
 
     if (MODE === 'fetch' || MODE === 'all') {
+      fetchStartMs = Date.now();
       const result = await runFetchAndClassifyService(db, runId);
       fetchResult = result;
       totalProcessed += result.processed;
@@ -721,6 +723,14 @@ async function main(): Promise<void> {
     if (fetchResult && process.env.SLACK_REPORT_CHANNEL) {
       const dateForReport =
         process.env.FETCH_DATE || process.env.REPORT_DATE || new Date().toISOString().split('T')[0];
+      const durationSec = Math.round((Date.now() - fetchStartMs) / 1000);
+      const runAtPT = new Date().toLocaleString('en-US', {
+        timeZone: 'America/Los_Angeles',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      }) + ' PT';
       const msg = buildProcessRepliesMessage({
         date: dateForReport,
         unreadCount: fetchResult.unreadCount,
@@ -733,6 +743,8 @@ async function main(): Promise<void> {
         autoReply: fetchResult.auto_reply,
         notAReply: fetchResult.not_a_reply,
         autoReplied: fetchResult.hot,
+        runAtPT,
+        durationSec,
       });
       await postToReportChannel(msg);
     }

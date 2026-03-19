@@ -56,8 +56,9 @@ INSERTED_THIS_RUN=$(BATCH_ID="$BATCH_ID" get_apollo_inserted_count_for_batch "$B
 VERIFIED_THIS_RUN=$(BATCH_ID="$BATCH_ID" get_bouncer_verified_count_for_batch "$BATCH_ID")
 VERIFIED=$(get_verified_count_today)
 APOLLO_TODAY=$(get_apollo_inserted_count_today)
+PT_AT="$(get_pt_timestamp)"
 
-MSG="✅ Build-list batch done in ${DURATION}s. This run: inserted ${INSERTED_THIS_RUN}, verified ${VERIFIED_THIS_RUN}. Today: apollo_inserted ${APOLLO_TODAY}/${DAILY_CAP}, bouncer_verified ${VERIFIED}."
+MSG="✅ [${PT_AT}] Build-list done in ${DURATION}s. This run: inserted ${INSERTED_THIS_RUN}, verified ${VERIFIED_THIS_RUN}. Today: apollo_inserted ${APOLLO_TODAY}/${DAILY_CAP}, bouncer_verified ${VERIFIED}."
 log_success "$MSG"
 post_slack_report "$MSG"
 

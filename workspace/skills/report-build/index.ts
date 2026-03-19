@@ -93,6 +93,7 @@ async function main() {
 
   let primaryCampaignId: string | null = null;
   let sent = 0, opened = 0, repliesInst = 0;
+  let contacted = 0, newLeadsContacted = 0, clicks = 0, uniqueClicks = 0;
 
   for (const cid of campaignIds) {
     const row = await fetchInstantlyDailyAnalytics(reportDate, cid);
@@ -117,6 +118,10 @@ async function main() {
       sent = row.sent ?? 0;
       opened = row.unique_opened ?? row.opened ?? 0;
       repliesInst = row.unique_replies ?? row.replies ?? 0;
+      contacted = row.contacted ?? 0;
+      newLeadsContacted = row.new_leads_contacted ?? 0;
+      clicks = row.clicks ?? 0;
+      uniqueClicks = row.unique_clicks ?? 0;
     }
   }
 
@@ -171,9 +176,19 @@ async function main() {
     },
   };
 
+  const reportRunAtPT =
+    new Date().toLocaleString('en-US', {
+      timeZone: 'America/Los_Angeles',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    }) + ' PT';
+
   const text = buildDailyReportMessage({
     reportDate,
     campaignIdShort: primaryCampaignId ? `${primaryCampaignId.slice(0, 8)}...` : undefined,
+    reportRunAtPT,
     personIdsCount: person_ids_count,
     leadsPulled: leads_pulled,
     leadsValidated: leads_validated,
@@ -187,6 +202,10 @@ async function main() {
     openRatePct: `${openRatePct}%`,
     repliesInst,
     replyRatePct: `${replyRatePct}%`,
+    contacted: contacted > 0 ? contacted : undefined,
+    newLeadsContacted: newLeadsContacted > 0 ? newLeadsContacted : undefined,
+    clicks: clicks > 0 ? clicks : undefined,
+    uniqueClicks: uniqueClicks > 0 ? uniqueClicks : undefined,
     repliesFetched: replies_fetched,
     hotCount: hot_count,
     softCount: soft_count,
