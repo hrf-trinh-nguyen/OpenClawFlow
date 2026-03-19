@@ -541,23 +541,28 @@ async function runFetchAndClassifyService(db: any, runId: string): Promise<Fetch
         console.log(`   ${reply.from_email}: ${classification.category} (${classification.confidence})`);
 
         const bodySnippet = body.substring(0, 500);
+        const threadId = reply.thread_id || `thread-${Date.now()}`;
         await db.query(
           `INSERT INTO replies 
            (from_email, subject, body_snippet, thread_id, reply_category, category_confidence, 
-            reply_text, timestamp, fetched_at, classified_at)
-           VALUES ($1, $2, $3, $4, $5::reply_category, $6, $3, NOW(), NOW(), NOW())
+            reply_text, timestamp, fetched_at, classified_at, email_id, eaccount)
+           VALUES ($1, $2, $3, $4, $5::reply_category, $6, $3, NOW(), NOW(), NOW(), $7, $8)
            ON CONFLICT (thread_id) DO UPDATE SET
              reply_category = EXCLUDED.reply_category,
              category_confidence = EXCLUDED.category_confidence,
              classified_at = EXCLUDED.classified_at,
+             email_id = COALESCE(EXCLUDED.email_id, replies.email_id),
+             eaccount = COALESCE(EXCLUDED.eaccount, replies.eaccount),
              updated_at = NOW()`,
           [
             reply.from_email,
             subject,
             bodySnippet,
-            reply.thread_id || `thread-${Date.now()}`,
+            threadId,
             classification.category,
             classification.confidence,
+            reply.email_id || null,
+            reply.eaccount || null,
           ]
         );
 

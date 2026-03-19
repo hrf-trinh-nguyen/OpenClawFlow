@@ -258,6 +258,7 @@ var BOUNCER_BATCH_SIZE = clamp(
   1,
   RATE_LIMITS.BOUNCER_BATCH_SIZE_MAX
 );
+var BOUNCER_LIMIT = process.env.BOUNCER_LIMIT ? parseIntSafe(process.env.BOUNCER_LIMIT, 0) : 0;
 async function bouncerSubmitBatch(emails) {
   const body = emails.map((email) => ({ email }));
   const response = await fetch(API_ENDPOINTS.BOUNCER.SUBMIT_BATCH, {
@@ -331,7 +332,12 @@ async function main() {
     console.error("\u274C Failed to connect to database");
     process.exit(1);
   }
-  const pendingLeads = await getLeadsByStatus(db, "apollo_matched", 1e4);
+  const fetchLimit = BOUNCER_LIMIT > 0 ? BOUNCER_LIMIT : 1e4;
+  if (BOUNCER_LIMIT > 0) {
+    console.log(`   Daily limit: ${BOUNCER_LIMIT} (from BOUNCER_LIMIT)
+`);
+  }
+  const pendingLeads = await getLeadsByStatus(db, "apollo_matched", fetchLimit);
   if (pendingLeads.length === 0) {
     console.log("\u2139\uFE0F  No leads pending verification (status=apollo_matched)\n");
     await db.end();

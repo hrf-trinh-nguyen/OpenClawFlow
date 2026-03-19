@@ -20,7 +20,7 @@ Don't ask permission. Just do it.
 
 ## Workspace skills (this project) — use when user asks "how many skills", "what skills", "list skills"
 
-**This project has 8 skills.** When the user asks how many skills you have, what skills you have, list your skills, or "what skills do you have", answer with this list:
+**This project has 9 skills.** When the user asks how many skills you have, what skills you have, list your skills, or "what skills do you have", answer with this list:
 
 | # | Name | What it does |
 |---|------|--------------|
@@ -32,12 +32,13 @@ Don't ask permission. Just do it.
 | 6 | `lead-stats` | Lead statistics: count by status, failed reasons (processing_error). |
 | 7 | `lead-move` | Move leads between statuses (FROM_STATUS, TO_STATUS). |
 | 8 | `lead-delete` | Delete leads by status (DELETE_STATUS). |
+| 9 | `reply-by-category` | Send template reply to leads with given reply_category (hot, soft, objection). Use REPLY_CATEGORY or REPLY_CATEGORIES, REPLY_LIMIT. |
 
 **Workflows:** `full` (entire pipeline), `build-list` (apollo → bouncer), `load-campaign` (instantly MODE=load), `process-replies` (instantly MODE=fetch), `daily-report` (report-build → slack-notify). See `rules/workflows.md` for exact commands.
 
 ### What I support
 
-Workflows: full, build-list, load-campaign, process-replies, daily-report. Triggers: "Run workflow X", "get N leads", "lead stats", "move failed to apollo_matched", "delete failed leads". See `rules/workflows.md` and `rules/flexible-pipeline-execution.md` for commands.
+Workflows: full, build-list, load-campaign, process-replies, daily-report. Triggers: "Run workflow X", "get N leads", "lead stats", "move failed to apollo_matched", "delete failed leads", "send reply to hot/soft/objection leads". See `rules/workflows.md` and `rules/flexible-pipeline-execution.md` for commands.
 
 ---
 

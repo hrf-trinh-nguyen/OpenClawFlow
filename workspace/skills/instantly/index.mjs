@@ -192,6 +192,16 @@ function parseIntSafe(value, fallback) {
   const parsed = parseInt(value, 10);
   return isNaN(parsed) ? fallback : parsed;
 }
+var REPORT_TIMEZONE = "America/Los_Angeles";
+function getTodayDateString() {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: REPORT_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  });
+  return formatter.format(/* @__PURE__ */ new Date());
+}
 function getDateRange(fromEnv, toEnv, singleEnv) {
   if (fromEnv && toEnv) {
     const [y1, m1, d1] = fromEnv.split("-").map(Number);
@@ -202,15 +212,16 @@ function getDateRange(fromEnv, toEnv, singleEnv) {
     return { min: minDate.toISOString(), max: maxDate.toISOString() };
   }
   if (singleEnv) {
-    const [y, m, d] = singleEnv.split("-").map(Number);
-    const dayStart = new Date(Date.UTC(y, (m || 1) - 1, d || 1));
+    const [y2, m2, d2] = singleEnv.split("-").map(Number);
+    const dayStart = new Date(Date.UTC(y2, (m2 || 1) - 1, d2 || 1));
     const dayEnd = new Date(dayStart);
     dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
     return { min: dayStart.toISOString(), max: dayEnd.toISOString() };
   }
-  const now = /* @__PURE__ */ new Date();
-  const localStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const localEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  const todayPT = getTodayDateString();
+  const [y, m, d] = todayPT.split("-").map(Number);
+  const localStart = new Date(y, (m || 1) - 1, d || 1);
+  const localEnd = new Date(y, (m || 1) - 1, (d || 1) + 1);
   return { min: localStart.toISOString(), max: localEnd.toISOString() };
 }
 
@@ -747,23 +758,28 @@ async function runFetchAndClassifyService(db, runId) {
         const classification = nonReply ? { category: nonReply, confidence: 1 } : await classifyReply(subject, body);
         console.log(`   ${reply.from_email}: ${classification.category} (${classification.confidence})`);
         const bodySnippet = body.substring(0, 500);
+        const threadId = reply.thread_id || `thread-${Date.now()}`;
         await db.query(
           `INSERT INTO replies 
            (from_email, subject, body_snippet, thread_id, reply_category, category_confidence, 
-            reply_text, timestamp, fetched_at, classified_at)
-           VALUES ($1, $2, $3, $4, $5::reply_category, $6, $3, NOW(), NOW(), NOW())
+            reply_text, timestamp, fetched_at, classified_at, email_id, eaccount)
+           VALUES ($1, $2, $3, $4, $5::reply_category, $6, $3, NOW(), NOW(), NOW(), $7, $8)
            ON CONFLICT (thread_id) DO UPDATE SET
              reply_category = EXCLUDED.reply_category,
              category_confidence = EXCLUDED.category_confidence,
              classified_at = EXCLUDED.classified_at,
+             email_id = COALESCE(EXCLUDED.email_id, replies.email_id),
+             eaccount = COALESCE(EXCLUDED.eaccount, replies.eaccount),
              updated_at = NOW()`,
           [
             reply.from_email,
             subject,
             bodySnippet,
-            reply.thread_id || `thread-${Date.now()}`,
+            threadId,
             classification.category,
-            classification.confidence
+            classification.confidence,
+            reply.email_id || null,
+            reply.eaccount || null
           ]
         );
         switch (classification.category) {

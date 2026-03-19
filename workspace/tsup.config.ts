@@ -14,6 +14,7 @@ export default defineConfig({
     'skills/lead-move/index':      'skills/lead-move/index.ts',
     'skills/lead-delete/index':    'skills/lead-delete/index.ts',
     'skills/csv-import/index':     'skills/csv-import/index.ts',
+    'skills/reply-by-category/index': 'skills/reply-by-category/index.ts',
     // Shared libraries
     'lib/supabase-pipeline': 'lib/supabase-pipeline.ts',
     'lib/supabase-legacy':   'lib/supabase-legacy.ts',

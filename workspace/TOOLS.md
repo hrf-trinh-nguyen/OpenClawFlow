@@ -6,7 +6,7 @@ Skills define _how_ tools work. This file is for _your_ specifics — the stuff 
 
 ## Runnable skills (outbound pipeline)
 
-**You have 8 skills.** When the user asks "what skills do you have", "run build-list", "run workflow build-list", etc., **run the pipeline skills** (from `~/.openclaw` with `source .env`).
+**You have 9 skills.** When the user asks "what skills do you have", "run build-list", "run workflow build-list", etc., **run the pipeline skills** (from `~/.openclaw` with `source .env`).
 
 | Name | What it does |
 |------|--------------|
@@ -18,6 +18,7 @@ Skills define _how_ tools work. This file is for _your_ specifics — the stuff 
 | `lead-stats` | Count leads by status; for failed: breakdown by processing_error. |
 | `lead-move` | Move leads from one status to another (FROM_STATUS, TO_STATUS, optional LIMIT). |
 | `lead-delete` | Delete leads by status (DELETE_STATUS, optional LIMIT). Permanent. |
+| `reply-by-category` | Send reply template to leads with a given reply_category (hot, soft, objection). ENV: REPLY_CATEGORY or REPLY_CATEGORIES (comma), REPLY_LIMIT. |
 
 ### Workflows (run in this order)
 
@@ -37,6 +38,13 @@ Skills define _how_ tools work. This file is for _your_ specifics — the stuff 
 ```bash
 REPORT_DATE=2026-03-06 node workspace/skills/report-build/index.mjs
 ```
+
+**Reply by category:** When user asks "send reply to hot leads" or "reply to leads with category soft":
+```bash
+REPLY_CATEGORY=hot node workspace/skills/reply-by-category/index.mjs
+# Or multiple: REPLY_CATEGORIES=hot,soft,objection REPLY_LIMIT=20 node workspace/skills/reply-by-category/index.mjs
+```
+Requires migration 011 (email_id, eaccount in replies). Only works for replies fetched *after* that migration.
 
 **Ref:** `rules/workflows.md`, `rules/flexible-pipeline-execution.md`.
 

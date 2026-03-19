@@ -247,8 +247,15 @@ function validateRequiredEnv(keys) {
     process.exit(1);
   }
 }
+var REPORT_TIMEZONE = "America/Los_Angeles";
 function getTodayDateString() {
-  return (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: REPORT_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  });
+  return formatter.format(/* @__PURE__ */ new Date());
 }
 
 // lib/constants.ts
