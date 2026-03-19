@@ -1,17 +1,30 @@
 # Scheduling — Crontab
 
-All 4 jobs run via **system crontab** (not OpenClaw agent cron).
+All jobs run via **system crontab** (not OpenClaw agent cron).
 
 **Lead source:** Apollo is not used. Use the Agent + **csv-import** skill to import CSV into the DB; the Bouncer cron verifies existing leads, then Load campaign pushes them to Instantly.
 
-## Schedule (Pacific Time)
+## Important: Timezone Handling
 
-| Job | Schedule (PT) | Script | Log |
-|-----|---------------|--------|-----|
-| Bouncer (verify leads) | 5:00 AM | `run-build-list.sh` | `logs/build-list.log` |
-| Load Campaign | 5:30 AM | `run-load-campaign.sh` | `logs/load-campaign.log` |
-| Process Replies | 10 AM–9 PM (hourly) | `run-process-replies.sh` | `logs/process-replies.log` |
-| Daily Report | 10:00 PM | `run-daily-report.sh` | `logs/daily-report.log` |
+**Cron uses SERVER TIMEZONE (UTC).** The `TZ` variable in crontab is NOT supported by most Linux cron daemons. All cron expressions in `crontab.example` are written in **UTC**.
+
+PT ↔ UTC conversion (PDT = UTC-7, active Mar–Nov):
+- 5 AM PT = 12:00 UTC
+- 10 AM PT = 17:00 UTC
+- 10 PM PT = 05:00 UTC (next day)
+
+## Schedule
+
+| Job | PT Time | UTC Time | Script | Log |
+|-----|---------|----------|--------|-----|
+| Bouncer (verify) | 5, 6, 7, 8 AM | 12, 13, 14, 15 | `run-build-list.sh` | `logs/build-list.log` |
+| Load Campaign | 5:30, 6:30, 7:30, 8:30 AM | 12:30, 13:30, 14:30, 15:30 | `run-load-campaign.sh` | `logs/load-campaign.log` |
+| Process Replies | 10 AM – 9 PM (hourly) | 17–23, 0–4 | `run-process-replies.sh` | `logs/process-replies.log` |
+| Daily Report | 10 PM | 05:00 | `run-daily-report.sh` | `logs/daily-report.log` |
+
+**Daily targets:**
+- Bouncer: 300 verified/day (4 runs × ~75 each)
+- Load: 250 pushed/day (4 runs × ~63 each)
 
 ---
 

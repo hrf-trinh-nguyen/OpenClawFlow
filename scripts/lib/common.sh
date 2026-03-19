@@ -142,6 +142,41 @@ try {
 EOF
 }
 
+# Count leads pending verification (apollo_matched, not yet verified)
+get_pending_verify_count() {
+  node --input-type=module <<'EOF'
+import pg from 'pg';
+const conn = (process.env.SUPABASE_DB_URL || '').trim().replace(/^['"]|['"]$/g, '');
+if (!conn) { console.log('0'); process.exit(0); }
+const pool = new pg.Pool({ connectionString: conn });
+try {
+  const r = await pool.query(`
+    SELECT COUNT(*)::int AS c FROM leads
+    WHERE processing_status = 'apollo_matched'
+  `);
+  console.log(r.rows[0]?.c ?? 0);
+} catch { console.log('0'); } finally { await pool.end(); }
+EOF
+}
+
+# Count verified leads ready to load (bouncer_verified, not yet loaded)
+get_verified_ready_count() {
+  node --input-type=module <<'EOF'
+import pg from 'pg';
+const conn = (process.env.SUPABASE_DB_URL || '').trim().replace(/^['"]|['"]$/g, '');
+if (!conn) { console.log('0'); process.exit(0); }
+const pool = new pg.Pool({ connectionString: conn });
+try {
+  const r = await pool.query(`
+    SELECT COUNT(*)::int AS c FROM leads
+    WHERE processing_status = 'bouncer_verified'
+      AND (blacklisted = false OR blacklisted IS NULL)
+  `);
+  console.log(r.rows[0]?.c ?? 0);
+} catch { console.log('0'); } finally { await pool.end(); }
+EOF
+}
+
 # Current time in Pacific (for Slack report accuracy)
 get_pt_timestamp() {
   TZ=America/Los_Angeles date '+%b %d, %I:%M %p PT'

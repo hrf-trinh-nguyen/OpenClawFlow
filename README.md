@@ -1,6 +1,6 @@
 # OpenClaw Outbound Automation
 
-Outbound lead pipeline powered by **OpenClaw**: lead verification (Bouncer), campaign loading (Instantly), reply processing, and daily reporting. Scheduling uses **system crontab** (Pacific Time). Leads are imported via the Agent + **csv-import** skill; no Apollo in the cron flow.
+Outbound lead pipeline powered by **OpenClaw**: lead verification (Bouncer), campaign loading (Instantly), reply processing, and daily reporting. Scheduling uses **system crontab**. Leads are imported via the Agent + **csv-import** skill; no Apollo in the cron flow.
 
 ## Overview
 
@@ -12,16 +12,16 @@ Outbound lead pipeline powered by **OpenClaw**: lead verification (Bouncer), cam
 | **Process replies** | Cron fetches inbox, classifies replies (hot/soft/objection/negative), auto-replies to hot leads. |
 | **Daily report** | Cron aggregates metrics and posts to Slack. |
 
-All times are **Pacific (America/Los_Angeles)**.
-
 ## Schedule (Crontab)
 
-| Job | Time (PT) | Script | Log |
-|-----|-----------|--------|-----|
-| Bouncer | 5:00 AM | `run-build-list.sh` | `logs/build-list.log` |
-| Load campaign | 5:30 AM | `run-load-campaign.sh` | `logs/load-campaign.log` |
-| Process replies | 10 AM–9 PM hourly | `run-process-replies.sh` | `logs/process-replies.log` |
-| Daily report | 10:00 PM | `run-daily-report.sh` | `logs/daily-report.log` |
+**Important:** Cron uses server timezone (UTC). PT times shown for reference.
+
+| Job | PT Time | UTC Time | Script | Log |
+|-----|---------|----------|--------|-----|
+| Bouncer | 5, 6, 7, 8 AM | 12, 13, 14, 15 | `run-build-list.sh` | `logs/build-list.log` |
+| Load campaign | 5:30, 6:30, 7:30, 8:30 AM | 12:30, 13:30, 14:30, 15:30 | `run-load-campaign.sh` | `logs/load-campaign.log` |
+| Process replies | 10 AM – 9 PM (hourly) | 17–23, 0–4 | `run-process-replies.sh` | `logs/process-replies.log` |
+| Daily report | 10 PM | 05:00 | `run-daily-report.sh` | `logs/daily-report.log` |
 
 See [cron/README.md](cron/README.md) for install and usage.
 
