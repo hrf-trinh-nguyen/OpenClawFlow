@@ -133,12 +133,22 @@ async function instantlyAddLeads(leads: any[]): Promise<AddLeadsResult> {
 
       if (response.ok) {
         const uploaded = data.leads_uploaded ?? 0;
-        const created = data.created_leads ?? [];
+        const created: Array<{ index?: number; email?: string }> = data.created_leads ?? [];
         totalSuccess += uploaded;
 
+        // Map created_leads back to our lead IDs. Only update leads Instantly confirmed as added.
+        const seen = new Set<string>();
         for (const c of created) {
+          let leadId: string | undefined;
           if (typeof c.index === 'number' && batch[c.index]?.id) {
-            successIds.push(batch[c.index].id);
+            leadId = batch[c.index].id;
+          } else if (c.email) {
+            const match = batch.find((l) => l.email && String(l.email).toLowerCase() === String(c.email).toLowerCase());
+            leadId = match?.id;
+          }
+          if (leadId && !seen.has(leadId)) {
+            seen.add(leadId);
+            successIds.push(leadId);
           }
         }
 
@@ -147,8 +157,11 @@ async function instantlyAddLeads(leads: any[]): Promise<AddLeadsResult> {
         const invalid = data.invalid_email_count ?? 0;
         totalFailed += Math.max(0, batch.length - uploaded);
 
+        if (successIds.length > 0 && successIds.length !== created.length) {
+          console.log(`   ⚠️  Mapping: ${successIds.length} lead IDs from ${created.length} created_leads (deduped by id)`);
+        }
         console.log(
-          `   ✅ Batch ${batchNum}/${totalBatches}: ${uploaded} uploaded, ${skipped} skipped, ${duped} duped, ${invalid} invalid`
+          `   ✅ Batch ${batchNum}/${totalBatches}: ${uploaded} uploaded (${successIds.length} confirmed for DB), ${skipped} skipped, ${duped} duped, ${invalid} invalid`
         );
       } else {
         totalFailed += batch.length;
