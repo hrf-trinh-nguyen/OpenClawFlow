@@ -67,7 +67,7 @@ try {
 EOF
 }
 
-# Số lead đã load lên Instantly trong ngày (updated_at hôm nay)
+# Count leads marked instantly_loaded today (updated_at today, PT)
 get_loaded_count_today() {
   node --input-type=module <<'EOF'
 import pg from 'pg';
@@ -85,7 +85,7 @@ try {
 EOF
 }
 
-# Số lead mới từ Apollo đã insert trong ngày (created_at hôm nay, PT)
+# Count leads inserted from Apollo today (created_at today, PT)
 get_apollo_inserted_count_today() {
   node --input-type=module <<'EOF'
 import pg from 'pg';

@@ -1,186 +1,136 @@
 # OpenClaw Outbound Automation
 
-Autonomous outbound automation powered by **OpenClaw**. List building, campaign loading, reply processing, and daily reporting—all running on skills + cron.
+Outbound lead pipeline powered by **OpenClaw**: lead verification (Bouncer), campaign loading (Instantly), reply processing, and daily reporting. Scheduling uses **system crontab** (Pacific Time). Leads are imported via the Agent + **csv-import** skill; no Apollo in the cron flow.
 
 ## Overview
 
-OpenClaw runs the full pipeline while Instantly handles actual email sending:
+| Step | Description |
+|------|-------------|
+| **Lead source** | Agent + **csv-import** (CSV or Google Sheet) → leads in DB with `processing_status=apollo_matched` |
+| **Bouncer** | Cron verifies emails (Bouncer API), updates to `bouncer_verified` or `failed`. Daily cap: `BOUNCER_DAILY_CAP` (default 300). |
+| **Load campaign** | Cron pushes verified leads to Instantly. Daily cap: `INSTANTLY_LOAD_DAILY_CAP` (default 250). |
+| **Process replies** | Cron fetches inbox, classifies replies (hot/soft/objection/negative), auto-replies to hot leads. |
+| **Daily report** | Cron aggregates metrics and posts to Slack. |
 
-| Time (Asia/Ho_Chi_Minh) | Workflow | Action |
-|-------------------------|----------|--------|
-| **6:00 AM** | `build-list` | apollo → bouncer |
-| **6:30 AM** | `load-campaign` | instantly (MODE=load) |
-| **9:00 AM – 5:00 PM** | *(Instantly UI)* | Sending window (autopilot) |
-| **6:00 PM** | `process-replies` | instantly (MODE=fetch): classify + reply hot |
-| **8:00 PM** | `process-replies` | same (6–9:30 window) |
-| **10:00 PM** | `daily-report` | report-build → slack-notify |
+All times are **Pacific (America/Los_Angeles)**.
 
-**Philosophy:** 2 emails per prospect, 45-day coverage cycle. Full TAM coverage every 45 days.
+## Schedule (Crontab)
 
-## Structure
+| Job | Time (PT) | Script | Log |
+|-----|-----------|--------|-----|
+| Bouncer | 5:00 AM | `run-build-list.sh` | `logs/build-list.log` |
+| Load campaign | 5:30 AM | `run-load-campaign.sh` | `logs/load-campaign.log` |
+| Process replies | 10 AM–9 PM hourly | `run-process-replies.sh` | `logs/process-replies.log` |
+| Daily report | 10:00 PM | `run-daily-report.sh` | `logs/daily-report.log` |
+
+See [cron/README.md](cron/README.md) for install and usage.
+
+## Project structure
 
 ```
-~/.openclaw/  (symlink → openclaw-mvp)
-├── openclaw.json       # Gateway, channels, skills env, cron config
-├── .env                # API keys (do not commit)
-├── cron/jobs.json      # Cron jobs (add via openclaw cron add)
+openclaw-mvp/
+├── .env                    # API keys, caps (do not commit)
+├── openclaw.json           # Gateway, channels, skills env
+├── cron/
+│   ├── crontab.example     # Crontab template (install via scripts/install-cron.sh)
+│   └── jobs.json           # OpenClaw cron (disabled; we use system crontab)
+├── scripts/
+│   ├── run-build-list.sh   # Bouncer only (verify leads from DB)
+│   ├── run-load-campaign.sh
+│   ├── run-process-replies.sh
+│   ├── run-daily-report.sh
+│   ├── after-pull-vps.sh    # After git pull: install, build, restart
+│   ├── install-cron.sh     # Install crontab from crontab.example
+│   └── lib/common.sh       # Shared helpers, Slack, DB counts
 └── workspace/
     ├── skills/
-    │   ├── apollo/
-    │   ├── bouncer/
-    │   ├── instantly/
-    │   ├── report-build/
-    │   └── slack-notify/
-    └── rules/
-        ├── workflows.md            # Workflow definitions (Run workflow: &lt;name&gt;)
-        ├── build-list-rules.md
-        ├── campaign-rules.md
-        ├── reply-classification.md
-        ├── daily-schedule.md
-        └── outbound-management.md   # Main playbook
+    │   ├── apollo/         # (Optional) Apollo search + match
+    │   ├── bouncer/        # Email verification
+    │   ├── instantly/      # Load leads + fetch/classify replies
+    │   ├── report-build/   # Daily report aggregation
+    │   ├── slack-notify/   # Send report to Slack
+    │   └── csv-import/     # Import CSV/Google Sheet → DB
+    ├── lib/                # Shared TS (constants, DB, Slack templates)
+    └── rules/              # Workflows, playbook
 ```
 
 ## Setup
 
-### 1. Install OpenClaw
-
-Install the CLI globally (skills use a local **@openclaw/sdk** shim so they load when the gateway runs from this workspace):
+### 1. Dependencies
 
 ```bash
 npm install -g openclaw
-openclaw --version  # 2026.3.2
-```
-
-Then install workspace dependencies (this also creates the `@openclaw/sdk` shim in `workspace/node_modules`):
-
-```bash
 cd workspace && npm install
 ```
 
-### 2. Environment Variables
+### 2. Environment
 
-Copy `workspace/.env.example` to `~/.openclaw/.env` (or repo root `.env`) and fill in:
+Copy `.env.example` to `.env` (repo root or `~/.openclaw/.env`) and set:
 
-```bash
-OPENAI_API_KEY=           # LLM for agent + reply classification (OpenAI)
-SLACK_APP_TOKEN=xapp-...
-SLACK_BOT_TOKEN=xoxb-...
-SLACK_REPORT_CHANNEL=     # Channel ID (e.g. C01234ABCDE)
-APOLLO_API_KEY=
-BOUNCER_API_KEY=
-INSTANTLY_API_KEY=
-INSTANTLY_CAMPAIGN_ID=
-```
+| Variable | Purpose |
+|----------|---------|
+| `OPENAI_API_KEY` | LLM for agent + reply classification |
+| `SLACK_APP_TOKEN`, `SLACK_BOT_TOKEN` | Slack (Socket Mode) |
+| `SLACK_REPORT_CHANNEL`, `SLACK_ALERT_CHANNEL` | Report and alert channel IDs |
+| `BOUNCER_API_KEY` | Bouncer email verification |
+| `BOUNCER_DAILY_CAP` | Max leads to verify per day (default 300) |
+| `INSTANTLY_API_KEY`, `INSTANTLY_CAMPAIGN_ID` | Instantly campaign |
+| `INSTANTLY_LOAD_DAILY_CAP` | Max leads to push to Instantly per day (default 250) |
+| `SUPABASE_DB_URL` | PostgreSQL connection string |
 
-### 3. Model & LLM
-
-- Set `agents.defaults.model` in `openclaw.json` (e.g. `openai/gpt-4o` or `anthropic/claude-opus-4-6`).
-- Set `OPENAI_API_KEY` in `.env` for OpenAI, or `ANTHROPIC_API_KEY` for Anthropic.
-
-See [OpenClaw Configuration](https://docs.openclaw.ai/gateway/configuration-reference).
-
-### 4. Run Gateway
+### 3. Gateway
 
 ```bash
 openclaw gateway
 ```
 
-### 5. Register Cron Jobs
-
-With the gateway running:
+### 4. Crontab (VPS)
 
 ```bash
-./scripts/register-cron-jobs.sh
-openclaw cron list
+./scripts/install-cron.sh
+crontab -l   # verify 4 jobs
 ```
 
-## Slack (Socket Mode)
+## Deploy (VPS)
 
-Slack uses **Socket Mode** by default. See [OpenClaw Slack docs](https://docs.openclaw.ai/channels/slack#socket-mode-default): enable Socket Mode in the Slack app, create an App Token (`xapp-...`) with `connections:write`, install the app and set `SLACK_APP_TOKEN` and `SLACK_BOT_TOKEN` in `.env`.
-
-### Two ways to run skills from Slack
-
-**1. Slash commands (recommended)**  
-`openclaw.json` has `channels.slack.commands.native: true` and `channels.slack.commands.nativeSkills: true`. In the Slack app you must **create slash commands** so the gateway can run skills:
-
-- **Option A – one command:** Create a slash command named **`skill`**. Users run e.g. `/skill apollo` or `/skill build-list` (workflow = run skills in order per `rules/workflows.md`).
-- **Option B – one per skill:** Create slash commands for each skill: `/apollo`, `/bouncer`, `/instantly`, `/report-build`, `/slack-notify`. Use the same Request URL as for other slash commands (your gateway’s Slack events URL).
-
-Slack reserves `/status`; register **`/agentstatus`** for the status command. **How to create each command in Slack:** see [docs/slack-slash-commands.md](docs/slack-slash-commands.md). See also [Slash commands](https://docs.openclaw.ai/tools/slash-commands).
-
-**2. Chat (workflow / “what skills”)**  
-In DM or channel, the agent is instructed to treat these as workflow commands and to read `TOOLS.md` for the skill list:
-
-- **Run workflow: build-list** — apollo → bouncer
-- **Run workflow: load-campaign** — instantly (MODE=load)
-- **Run workflow: process-replies** — instantly (MODE=fetch)
-- **Run workflow: daily-report** — report-build → slack-notify
-- **“What skills do you have?”** — agent answers using the "Runnable workspace skills" section in `TOOLS.md`.
-
-**Setup:** If you use a **channel**, add it under `channels.slack.channels`; the bot must be in the channel and you must @mention it if `requireMention` is on. Restart the gateway after changing config.
-
-## Workflows & skills
-
-**Commands:** Use `Run workflow: build-list` (etc.). See `workspace/rules/workflows.md`.
-
-| Workflow | Skills (in order) |
-|----------|-------------------|
-| build-list | apollo → bouncer |
-| load-campaign | instantly (MODE=load) |
-| process-replies | instantly (MODE=fetch) |
-| daily-report | report-build → slack-notify |
-
-| Skill | Service | Env |
-|-------|---------|-----|
-| apollo | Apollo Search + Match | APOLLO_API_KEY |
-| bouncer | Bouncer batch verify | BOUNCER_API_KEY |
-| instantly | Load leads / fetch replies / classify | INSTANTLY_API_KEY, INSTANTLY_CAMPAIGN_ID |
-| report-build | Aggregate metrics | — |
-| slack-notify | Slack channel | SLACK_CHANNEL (SLACK_REPORT_CHANNEL) |
-
-## Rules
-
-Markdown files in `workspace/rules/` define the playbook:
-
-- **workflows.md** – Workflow names and skill order (Run workflow: &lt;name&gt;)
-- **build-list-rules.md** – ICP, validation, guardrails
-- **campaign-rules.md** – 2-email sequence, copy rotation, pause rules
-- **reply-classification.md** – hot/soft/objection/negative, actions, escalation
-- **daily-schedule.md** – 6:00 / 6:30 / 18:00 / 22:00 schedule
-- **outbound-management.md** – Single reference playbook
-
-## Cron Jobs
-
-Per [OpenClaw Cron Jobs](https://docs.openclaw.ai/automation/cron-jobs): jobs live in `~/.openclaw/cron/jobs.json`. Config in `openclaw.json` only (enabled, store, sessionRetention, runLog).
-
-| Name | Schedule | Timezone |
-|------|----------|----------|
-| 6AM - Build List | `0 6 * * *` | Asia/Ho_Chi_Minh |
-| 6:30AM - Load Campaign | `30 6 * * *` | Asia/Ho_Chi_Minh |
-| 6PM - Process Replies | `0 18 * * *` | Asia/Ho_Chi_Minh |
-| 10PM - Daily Report | `0 22 * * *` | Asia/Ho_Chi_Minh |
-
-## Slack
-
-- `openclaw.json` → `channels.slack`: Socket Mode, allowFrom (Slack user IDs)
-- Reports go to `SLACK_REPORT_CHANNEL`
-
-## Commands
+After `git pull`:
 
 ```bash
-openclaw doctor           # Check config
-openclaw gateway          # Run gateway
-openclaw cron list        # List cron jobs
-openclaw skill run apollo   # Run a single skill; or send "Run workflow: build-list" for full sequence
+./scripts/after-pull-vps.sh
 ```
 
-## Troubleshooting
+Optionally reinstall crontab if `cron/crontab.example` changed:
 
-- **API rate limit** (`⚠️ API rate limit reached` in logs): LLM provider (e.g. OpenAI) throttling; wait a few minutes or check usage/limits. See [docs/troubleshooting.md](docs/troubleshooting.md).
-- **Slack / skills / channels:** Same doc.
+```bash
+./scripts/install-cron.sh
+```
+
+## Run manually
+
+```bash
+./scripts/run-build-list.sh      # Bouncer only
+./scripts/run-load-campaign.sh
+./scripts/run-process-replies.sh
+./scripts/run-daily-report.sh
+```
+
+## Agent + skills
+
+When chatting with the agent (Slack or CLI), you can:
+
+- **Import leads:** Use the **csv-import** skill with a CSV path or Google Sheet URL → leads go to DB as `apollo_matched`. Next Bouncer cron run will verify them.
+- **Workflows:** “Run workflow: load-campaign”, “Run workflow: process-replies”, “Run workflow: daily-report” (see `workspace/rules/workflows.md`).
+- **Single skills:** e.g. run bouncer, instantly, report-build, slack-notify directly.
+
+## Daily caps (ENV)
+
+- **Bouncer:** `BOUNCER_DAILY_CAP` (default 300). Only this many leads are verified per day (PT).
+- **Instantly load:** `INSTANTLY_LOAD_DAILY_CAP` (default 250). Only this many verified leads are pushed to Instantly per day.
+
+Change these in `.env`; no code change required.
 
 ## References
 
-- [OpenClaw Pi Integration](https://docs.openclaw.ai/pi) – Embedded agent, session storage, model resolution
-- [OpenClaw Cron Jobs](https://docs.openclaw.ai/automation/cron-jobs) – Scheduler, isolated runs, delivery
-- [OpenClaw Configuration](https://docs.openclaw.ai/gateway/configuration-reference) – agents.defaults.model, env vars
+- [OpenClaw docs](https://docs.openclaw.ai)
+- [cron/README.md](cron/README.md) — Crontab install and schedule
+- [docs/troubleshooting.md](docs/troubleshooting.md) — Common issues

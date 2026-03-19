@@ -1,52 +1,36 @@
 # Daily Schedule
 
-Daily run schedule for OpenClaw outbound automation. All times are **Pacific Time (America/Los_Angeles, UTC-8/UTC-7 DST)**. Use **workflows** for multi-step runs (see workflows.md).
+Daily run schedule for OpenClaw outbound automation. All times are **Pacific Time (America/Los_Angeles)**. Scheduling uses **system crontab** (see repo root `cron/README.md`).
 
 ## Reporting Channels
 
-- **Step reports & daily report:** `C0A5S86QH9D` — send a summary after every completed step
-- **Errors:** `C0ALRRHK61X` — report any error or exception immediately
-
-After **every** workflow step completes, post a brief summary to `C0A5S86QH9D` (e.g. "Build List done: 200 leads collected, 187 bouncer_verified"). If any step throws an error, post to `C0ALRRHK61X` immediately.
+- **Step reports & daily report:** Send a summary after every completed step (channel from `SLACK_REPORT_CHANNEL`)
+- **Errors:** Report any error or exception to `SLACK_ALERT_CHANNEL`
 
 ---
 
-## 3:00 AM, 4:00 AM, 5:00 AM PT – Build List
+## 5:00 AM PT – Bouncer (verify leads)
 
-- **Workflow:** `build-list`
-- Skills: apollo → bouncer
-- **Runs via systemd timer** (`openclaw-build-list.timer`) — NOT via OpenClaw cron agent
-- **Daily target: 200 `bouncer_verified` leads.** Each run does a single Apollo batch (`TARGET_COUNT=100`) + one Bouncer pass.
-- Report completion summary to `C0A5S86QH9D`. Report errors to `C0ALRRHK61X`.
-- **Manual run:** `./scripts/run-build-list.sh` or `TARGET_COUNT=50 ./scripts/run-build-list.sh`
+- **Script:** `run-build-list.sh` (Bouncer only; no Apollo)
+- Reads leads with `processing_status=apollo_matched` from DB (e.g. from csv-import), verifies via Bouncer API, updates to `bouncer_verified` or `failed`
+- **Daily cap:** `BOUNCER_DAILY_CAP` (default 300)
+- **Manual run:** `./scripts/run-build-list.sh`
 
-## 5:15 AM, 5:45 AM PT – Load Campaign
+## 5:30 AM PT – Load Campaign
 
-- **Workflow:** `load-campaign`
+- **Script:** `run-load-campaign.sh`
 - Skill: instantly (MODE=load)
-- **Runs via systemd timer** (`openclaw-load-campaign.timer`) — NOT via OpenClaw cron agent
-- Add verified leads from DB to Instantly campaign in bounded batches (`LOAD_LIMIT=100`)
-- Report completion summary to `C0A5S86QH9D`. Report errors to `C0ALRRHK61X`.
-- **Manual run:** `./scripts/run-load-campaign.sh` or `LOAD_LIMIT=50 ./scripts/run-load-campaign.sh`
+- Pushes verified leads from DB to Instantly campaign. **Daily cap:** `INSTANTLY_LOAD_DAILY_CAP` (default 250)
+- **Manual run:** `./scripts/run-load-campaign.sh`
 
-## 9:00 AM – 5:00 PM PT – Sending Window
+## 10:00 AM – 9:00 PM PT – Process Replies (hourly)
 
-- Instantly sends automatically per its UI schedule
-- OpenClaw does not intervene during this window
-
-## 10:00 AM – 9:00 PM PT – Process Replies (Every Hour)
-
-- **Workflow:** `process-replies`
-- Runs at the top of every hour from 10 AM to 9 PM PT (`0 10-21 * * *`)
-- Skills: instantly (MODE=fetch, includes classify + hot reply)
-- Fetch today's replies from Instantly inbox, classify via LLM (hot/soft/objection/negative)
-- **Hot leads:** Send fixed template reply with Book now + Compare links
-- Log hot/soft/objection/negative counts; escalate if negative rate > 10%
-- Report each run summary (# replies fetched, # classified, # replied) to `C0A5S86QH9D`. Report errors to `C0ALRRHK61X`.
+- **Script:** `run-process-replies.sh`
+- Skill: instantly (MODE=fetch) — fetch inbox, classify replies (hot/soft/objection/negative), auto-reply to hot
+- **Manual run:** `./scripts/run-process-replies.sh`
 
 ## 10:00 PM PT – Daily Report
 
-- **Workflow:** `daily-report`
+- **Script:** `run-daily-report.sh`
 - Skills: report-build → slack-notify
-- Aggregate stats from DB, send full report to Slack channel `C0A5S86QH9D`
-- Report errors to `C0ALRRHK61X`.
+- Aggregate metrics from DB and Instantly API, send report to Slack

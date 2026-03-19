@@ -1,30 +1,30 @@
 # Scheduling — Crontab
 
-Tất cả 4 jobs đều chạy qua **system crontab** (không dùng OpenClaw agent cron).
+All 4 jobs run via **system crontab** (not OpenClaw agent cron).
 
-**Nguồn lead:** Không dùng Apollo. Dùng Agent + skill **csv-import** để import CSV vào DB; Bouncer cron sẽ verify lead có sẵn trong DB rồi Load campaign đẩy lên Instantly.
+**Lead source:** Apollo is not used. Use the Agent + **csv-import** skill to import CSV into the DB; the Bouncer cron verifies existing leads, then Load campaign pushes them to Instantly.
 
-## Lịch chạy (Pacific Time)
+## Schedule (Pacific Time)
 
-| Job | Lịch (PT) | Script | Log |
-|-----|-----------|--------|-----|
+| Job | Schedule (PT) | Script | Log |
+|-----|---------------|--------|-----|
 | Bouncer (verify leads) | 5:00 AM | `run-build-list.sh` | `logs/build-list.log` |
 | Load Campaign | 5:30 AM | `run-load-campaign.sh` | `logs/load-campaign.log` |
-| Process Replies | 10AM–9PM (mỗi giờ) | `run-process-replies.sh` | `logs/process-replies.log` |
+| Process Replies | 10 AM–9 PM (hourly) | `run-process-replies.sh` | `logs/process-replies.log` |
 | Daily Report | 10:00 PM | `run-daily-report.sh` | `logs/daily-report.log` |
 
 ---
 
-## Cài đặt Crontab
+## Install Crontab
 
 ```bash
-cd /home/deploy/openclaw-mvp   # hoặc ~/OpenClawFlow
+cd /home/deploy/openclaw-mvp   # or ~/OpenClawFlow
 ./scripts/install-cron.sh
 ```
 
-Script tự thay đường dẫn repo cho phù hợp với thư mục hiện tại.
+The script substitutes the repo path for your current directory.
 
-**Kiểm tra:**
+**Verify:**
 
 ```bash
 crontab -l
@@ -32,7 +32,7 @@ crontab -l
 
 ---
 
-## Chạy tay (test)
+## Run manually (testing)
 
 ```bash
 ./scripts/run-build-list.sh
@@ -43,7 +43,7 @@ crontab -l
 
 ---
 
-## Xem logs
+## View logs
 
 ```bash
 tail -f logs/build-list.log
@@ -51,33 +51,32 @@ tail -f logs/load-campaign.log
 tail -f logs/process-replies.log
 tail -f logs/daily-report.log
 
-# Xem tất cả
+# All logs
 tail -f logs/*.log
 ```
 
 ---
 
-## Đã tự chạy chưa? (kiểm tra trên VPS)
+## Verify cron is active (on VPS)
 
 ```bash
 crontab -l | grep openclaw
 ```
 
-Nếu thấy 4 dòng job → OK.
+You should see 4 job lines.
 
 ---
 
-## Sau khi pull code trên VPS
+## After pulling code on VPS
 
 ```bash
 git pull
 ./scripts/after-pull-vps.sh
-./scripts/install-cron.sh   # nếu crontab.example thay đổi
+./scripts/install-cron.sh   # if crontab.example changed
 ```
 
 ---
 
 ## OpenClaw cron (disabled)
 
-Tất cả jobs trong `cron/jobs.json` đã được set `enabled: false`.
-Không cần chạy `register-cron-jobs.sh` hay `openclaw cron list` nữa.
+All jobs in `cron/jobs.json` are set to `enabled: false`. You do not need to run `register-cron-jobs.sh` or `openclaw cron list`.

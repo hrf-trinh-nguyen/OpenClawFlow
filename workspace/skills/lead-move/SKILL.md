@@ -43,4 +43,4 @@ FROM_STATUS=failed TO_STATUS=apollo_matched node workspace/skills/lead-move/inde
 
 ## When to use
 
-- User says: "move failed leads to apollo_matched", "chuyển failed sang apollo_matched", "retry bouncer for failed"
+- User says: "move failed leads to apollo_matched", "retry bouncer for failed"

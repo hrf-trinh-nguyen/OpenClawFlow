@@ -101,14 +101,14 @@ cd ~/.openclaw && source .env && LOAD_LIMIT=100 MODE=load node workspace/skills/
    cd ~/.openclaw && source .env && FETCH_DATE_FROM=2026-03-01 FETCH_DATE_TO=2026-03-05 MODE=fetch node workspace/skills/instantly/index.mjs
    ```
 
-**Fetch + tổng hợp (report):**
+**Fetch + aggregate (report):**
    ```bash
    cd ~/.openclaw && source .env && \
    FETCH_DATE=$(date +%Y-%m-%d) MODE=fetch node workspace/skills/instantly/index.mjs && \
    REPORT_DATE=$(date +%Y-%m-%d) OPENCLAW_STATE_DIR="$HOME/.openclaw/state" node workspace/skills/report-build/index.mjs
    ```
 
-**Command:** `Run workflow: process-replies` / `fetch reply hôm nay và tổng hợp`
+**Command:** `Run workflow: process-replies` / `fetch today's replies and aggregate`
 
 ---
 

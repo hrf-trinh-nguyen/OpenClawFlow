@@ -33,5 +33,5 @@ cd ~/.openclaw && source .env && node workspace/skills/lead-stats/index.mjs
 
 ## When to use
 
-- User asks: "how many leads", "lead stats", "thống kê lead", "có bao nhiêu lead failed"
+- User asks: "how many leads", "lead stats", "lead count", "how many failed"
 - Before deciding to move or retry leads
