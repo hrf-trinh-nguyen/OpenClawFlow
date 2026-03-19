@@ -2,11 +2,13 @@
 
 Tất cả 4 jobs đều chạy qua **system crontab** (không dùng OpenClaw agent cron).
 
+**Nguồn lead:** Không dùng Apollo. Dùng Agent + skill **csv-import** để import CSV vào DB; Bouncer cron sẽ verify lead có sẵn trong DB rồi Load campaign đẩy lên Instantly.
+
 ## Lịch chạy (Pacific Time)
 
 | Job | Lịch (PT) | Script | Log |
 |-----|-----------|--------|-----|
-| Build List | 5:00 AM | `run-build-list.sh` | `logs/build-list.log` |
+| Bouncer (verify leads) | 5:00 AM | `run-build-list.sh` | `logs/build-list.log` |
 | Load Campaign | 5:30 AM | `run-load-campaign.sh` | `logs/load-campaign.log` |
 | Process Replies | 10AM–9PM (mỗi giờ) | `run-process-replies.sh` | `logs/process-replies.log` |
 | Daily Report | 10:00 PM | `run-daily-report.sh` | `logs/daily-report.log` |

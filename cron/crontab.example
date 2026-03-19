@@ -4,7 +4,7 @@
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ Schedule (all times PT = America/Los_Angeles)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Build list:       5:00 AM PT (Apollo + Bouncer)
+# │ Bouncer:          5:00 AM PT (verify leads in DB — no Apollo; use Agent + csv-import)
 # │ Load campaign:    5:30 AM PT (push verified leads to Instantly)
 # │ Process replies:  10AM–9PM PT hourly (fetch & classify inbox)
 # │ Daily report:     10:00 PM PT (aggregate metrics, send Slack)
@@ -13,7 +13,7 @@
 TZ=America/Los_Angeles
 OPENCLAW_REPO=/home/deploy/openclaw-mvp
 
-# ── Build List: 5:00 AM PT ────────────────────────────────────────────────────
+# ── Bouncer only: 5:00 AM PT ──────────────────────────────────────────────────
 0 5 * * * OPENCLAW_HOME=$OPENCLAW_REPO $OPENCLAW_REPO/scripts/run-build-list.sh >> $OPENCLAW_REPO/logs/build-list.log 2>&1
 
 # ── Load Campaign: 5:30 AM PT ─────────────────────────────────────────────────

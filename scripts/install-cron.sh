@@ -19,7 +19,7 @@ crontab -l
 
 echo ""
 echo "Done. All 4 jobs installed:"
-echo "  - Build list:       5:00 AM PT   → logs/build-list.log"
+echo "  - Bouncer:          5:00 AM PT   → logs/build-list.log"
 echo "  - Load campaign:    5:30 AM PT   → logs/load-campaign.log"
 echo "  - Process replies:  10AM–9PM PT  → logs/process-replies.log"
 echo "  - Daily report:     10:00 PM PT  → logs/daily-report.log"

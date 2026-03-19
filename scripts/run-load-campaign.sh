@@ -19,7 +19,7 @@ if LOAD_LIMIT="$LOAD_LIMIT" MODE=load node workspace/skills/instantly/index.mjs;
   DURATION=$(get_duration)
   LOADED_TODAY=$(get_loaded_count_today)
   LOADED_THIS_RUN=$((LOADED_TODAY - LOADED_BEFORE))
-  CAP="${INSTANTLY_LOAD_DAILY_CAP:-200}"
+  CAP="${INSTANTLY_LOAD_DAILY_CAP:-300}"
   PT_AT="$(get_pt_timestamp)"
   if [ "$LOADED_THIS_RUN" -le 0 ] && [ "$LOADED_TODAY" -ge "$CAP" ]; then
     MSG="✅ [${PT_AT}] Load-campaign done in ${DURATION}s (limit ${LOAD_LIMIT}). Skipped (daily cap: ${LOADED_TODAY}/${CAP})."

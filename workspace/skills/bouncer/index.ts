@@ -10,6 +10,7 @@
  * ENV variables:
  * - BOUNCER_API_KEY: Bouncer API key
  * - BOUNCER_BATCH_SIZE: batch size (default: 1000, max: 1000 per Bouncer rate limit)
+ * - BOUNCER_LIMIT: max leads to verify this run (e.g. set by cron from BOUNCER_DAILY_CAP remaining)
  * - SUPABASE_DB_URL: PostgreSQL connection string
  */
 
@@ -35,6 +36,8 @@ const BOUNCER_BATCH_SIZE = clamp(
   1,
   RATE_LIMITS.BOUNCER_BATCH_SIZE_MAX
 );
+/** Max leads to verify this run (e.g. remaining daily cap from cron). No env = no limit. */
+const BOUNCER_LIMIT = process.env.BOUNCER_LIMIT ? parseIntSafe(process.env.BOUNCER_LIMIT, 0) : 0;
 
 // ── Bouncer API ────────────────────────────────────────────────────
 
@@ -135,7 +138,11 @@ async function main() {
     process.exit(1);
   }
 
-  const pendingLeads = await getLeadsByStatus(db, 'apollo_matched', 10000);
+  const fetchLimit = BOUNCER_LIMIT > 0 ? BOUNCER_LIMIT : 10000;
+  if (BOUNCER_LIMIT > 0) {
+    console.log(`   Daily limit: ${BOUNCER_LIMIT} (from BOUNCER_LIMIT)\n`);
+  }
+  const pendingLeads = await getLeadsByStatus(db, 'apollo_matched', fetchLimit);
 
   if (pendingLeads.length === 0) {
     console.log('ℹ️  No leads pending verification (status=apollo_matched)\n');
