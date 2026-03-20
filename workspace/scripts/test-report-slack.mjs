@@ -7,7 +7,7 @@ function buildProcessRepliesMessage(p) {
   const notCustomer = (p.outOfOffice ?? 0) + (p.autoReply ?? 0) + (p.notAReply ?? 0);
   const lines = [
     `\u{1F4EC} *Process Replies Report*`,
-    `Date: ${p.date}${p.runAtPT ? `  \xB7  Run: ${p.runAtPT}` : ""}${p.durationSec !== void 0 ? `  \xB7  ${p.durationSec}s` : ""}`,
+    `Date: ${p.date}${p.runAtET ? `  \xB7  Run: ${p.runAtET}` : ""}${p.durationSec !== void 0 ? `  \xB7  ${p.durationSec}s` : ""}`,
     `\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550`,
     ``,
     `*Inbox*`,
@@ -35,7 +35,7 @@ function buildDailyReportMessage(p) {
   const totalClassified = p.repliesFetched;
   const lines = [
     `\u{1F4CA} *OpenClaw Daily Report*`,
-    `Date: ${p.reportDate}${p.campaignIdShort ? `  \xB7  Campaign: ${p.campaignIdShort}` : ""}${p.reportRunAtPT ? `  \xB7  Generated: ${p.reportRunAtPT}` : ""}`,
+    `Date: ${p.reportDate}${p.campaignIdShort ? `  \xB7  Campaign: ${p.campaignIdShort}` : ""}${p.reportRunAtET ? `  \xB7  Generated: ${p.reportRunAtET}` : ""}`,
     `\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550`,
     ``,
     `*Lead Pipeline*`,
@@ -91,18 +91,18 @@ async function postSlackMessage(channel, text) {
 
 // scripts/test-report-slack.ts
 var TEST_CHANNEL = process.env.SLACK_TEST_CHANNEL || "C0ALRRHK61X";
-function getNowPT() {
+function getNowET() {
   return (/* @__PURE__ */ new Date()).toLocaleString("en-US", {
-    timeZone: "America/Los_Angeles",
+    timeZone: "America/New_York",
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit"
-  }) + " PT";
+  }) + " ET";
 }
 async function main() {
   const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
-  const runAtPT = getNowPT();
+  const runAtET = getNowET();
   const processRepliesText = buildProcessRepliesMessage({
     date: today,
     unreadCount: 5,
@@ -115,13 +115,13 @@ async function main() {
     autoReply: 1,
     notAReply: 0,
     autoReplied: 2,
-    runAtPT,
+    runAtET,
     durationSec: 47
   });
   const dailyReportText = buildDailyReportMessage({
     reportDate: today,
     campaignIdShort: "7ba49983...",
-    reportRunAtPT: runAtPT,
+    reportRunAtET: runAtET,
     personIdsCount: 150,
     leadsPulled: 120,
     leadsValidated: 95,

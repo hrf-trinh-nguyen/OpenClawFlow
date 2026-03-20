@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Load Campaign: push verified leads to Instantly.
-# Runs 4x/day (5:30, 6:30, 7:30, 8:30 AM PT) to incrementally load leads.
+# Runs 4x/day (5:30, 6:30, 7:30, 8:30 AM US Eastern) to incrementally load leads.
 # Daily cap: INSTANTLY_LOAD_DAILY_CAP (default 250).
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

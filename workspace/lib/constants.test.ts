@@ -72,7 +72,7 @@ describe('DEFAULTS', () => {
   it('has expected defaults', () => {
     expect(DEFAULTS.TARGET_COUNT).toBe(5);
     expect(DEFAULTS.LOAD_LIMIT).toBe(100);
-    expect(DEFAULTS.INSTANTLY_LOAD_DAILY_CAP).toBe(200);
+    expect(DEFAULTS.INSTANTLY_LOAD_DAILY_CAP).toBe(250);
   });
 });
 

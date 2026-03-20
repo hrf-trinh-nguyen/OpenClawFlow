@@ -3,14 +3,14 @@
   "jobs": [
     {
       "id": "d66c8bed-6c9c-4100-93d6-590409600cea",
-      "name": "3AM-5AM PT - Build List (Batched)",
+      "name": "5–8 AM ET - Bouncer (Build List)",
       "enabled": false,
       "createdAtMs": 1772788600592,
       "updatedAtMs": 1773656167796,
       "schedule": {
         "kind": "cron",
-        "expr": "0 3-5 * * *",
-        "tz": "America/Los_Angeles"
+        "expr": "0 5,6,7,8 * * *",
+        "tz": "America/New_York"
       },
       "sessionTarget": "isolated",
       "wakeMode": "now",
@@ -37,14 +37,14 @@
     },
     {
       "id": "0d6eb890-7f8e-47a2-95d7-b50d268ff950",
-      "name": "5:15AM & 5:45AM PT - Load Campaign (Batched)",
+      "name": "5:30–8:30 AM ET - Load Campaign",
       "enabled": false,
       "createdAtMs": 1772788601690,
       "updatedAtMs": 1773656167815,
       "schedule": {
         "kind": "cron",
-        "expr": "15,45 5 * * *",
-        "tz": "America/Los_Angeles"
+        "expr": "30 5,6,7,8 * * *",
+        "tz": "America/New_York"
       },
       "sessionTarget": "isolated",
       "wakeMode": "now",
@@ -71,14 +71,14 @@
     },
     {
       "id": "f1a2b3c4-d5e6-7890-a1b2-c3d4e5f6a7b8",
-      "name": "10AM–9PM PT - Process Replies (Hourly)",
+      "name": "10AM–9PM ET - Process Replies (Hourly)",
       "enabled": false,
       "createdAtMs": 1773200000000,
       "updatedAtMs": 1773200000000,
       "schedule": {
         "kind": "cron",
         "expr": "0 10-21 * * *",
-        "tz": "America/Los_Angeles"
+        "tz": "America/New_York"
       },
       "sessionTarget": "isolated",
       "wakeMode": "now",
@@ -97,14 +97,14 @@
     },
     {
       "id": "82262b9e-6e42-447f-9e7a-c416015500fb",
-      "name": "10PM PT - Daily Report",
+      "name": "10PM ET - Daily Report",
       "enabled": false,
       "createdAtMs": 1772788603877,
       "updatedAtMs": 1773656167769,
       "schedule": {
         "kind": "cron",
         "expr": "0 22 * * *",
-        "tz": "America/Los_Angeles"
+        "tz": "America/New_York"
       },
       "sessionTarget": "isolated",
       "wakeMode": "now",

@@ -3,6 +3,9 @@
  */
 import type { DbClient } from './connection.js';
 
+/** Calendar date for reporting matches pipeline “business day” (US Eastern). */
+const BUSINESS_TZ = 'America/New_York';
+
 // ── Report Metrics Interface ────────────────────────────────────────
 
 export interface ReportMetrics {
@@ -58,7 +61,7 @@ export async function getMetricsForReport(
      FROM service_executions se
      JOIN pipeline_runs pr ON se.pipeline_run_id = pr.id
      WHERE pr.run_type = 'apollo_collection' AND se.service_name = 'apollo'
-       AND pr.completed_at::date = $1::date AND se.status = 'completed'`,
+       AND (pr.completed_at AT TIME ZONE '${BUSINESS_TZ}')::date = $1::date AND se.status = 'completed'`,
     [reportDate]
   );
   if (apolloRes.rows[0]) {
@@ -73,7 +76,7 @@ export async function getMetricsForReport(
      FROM service_executions se
      JOIN pipeline_runs pr ON se.pipeline_run_id = pr.id
      WHERE pr.run_type = 'bouncer_verify' AND se.service_name = 'bouncer'
-       AND pr.completed_at::date = $1::date AND se.status = 'completed'`,
+       AND (pr.completed_at AT TIME ZONE '${BUSINESS_TZ}')::date = $1::date AND se.status = 'completed'`,
     [reportDate]
   );
   if (bouncerRes.rows[0]) {
@@ -88,7 +91,7 @@ export async function getMetricsForReport(
      FROM service_executions se
      JOIN pipeline_runs pr ON se.pipeline_run_id = pr.id
      WHERE pr.run_type = 'instantly_load' AND se.service_name = 'instantly'
-       AND pr.completed_at::date = $1::date AND se.status = 'completed'`,
+       AND (pr.completed_at AT TIME ZONE '${BUSINESS_TZ}')::date = $1::date AND se.status = 'completed'`,
     [reportDate]
   );
   if (instRes.rows[0]) {
@@ -98,7 +101,7 @@ export async function getMetricsForReport(
 
   // Replies fetched (instantly_fetch)
   const repliesRes = await client.query(
-    `SELECT COUNT(*)::int as cnt FROM replies WHERE fetched_at::date = $1::date`,
+    `SELECT COUNT(*)::int as cnt FROM replies WHERE (fetched_at AT TIME ZONE '${BUSINESS_TZ}')::date = $1::date`,
     [reportDate]
   );
   metrics.replies_fetched = Number(repliesRes.rows[0]?.cnt) || 0;
@@ -107,7 +110,7 @@ export async function getMetricsForReport(
   const repliesClassRes = await client.query(
     `SELECT reply_category as category, COUNT(*)::int as cnt
      FROM replies
-     WHERE reply_category IS NOT NULL AND classified_at::date = $1::date
+     WHERE reply_category IS NOT NULL AND (classified_at AT TIME ZONE '${BUSINESS_TZ}')::date = $1::date
      GROUP BY reply_category`,
     [reportDate]
   );
@@ -129,7 +132,7 @@ export async function getMetricsForReport(
       `SELECT rc.category, COUNT(*)::int as cnt
        FROM reply_classifications rc
        JOIN replies r ON rc.reply_id = r.id
-       WHERE rc.classified_at::date = $1::date
+       WHERE (rc.classified_at AT TIME ZONE '${BUSINESS_TZ}')::date = $1::date
        GROUP BY rc.category`,
       [reportDate]
     );

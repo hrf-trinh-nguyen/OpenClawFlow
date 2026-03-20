@@ -137,8 +137,8 @@ async function getInstantlyLoadedCountToday(client) {
   const result = await client.query(
     `SELECT COUNT(*)::int AS c FROM leads
      WHERE processing_status = 'instantly_loaded'
-       AND (updated_at AT TIME ZONE 'America/Los_Angeles')::date =
-           (NOW() AT TIME ZONE 'America/Los_Angeles')::date`
+       AND (updated_at AT TIME ZONE 'America/New_York')::date =
+           (NOW() AT TIME ZONE 'America/New_York')::date`
   );
   return Number(((_a = result.rows[0]) == null ? void 0 : _a.c) ?? 0);
 }
@@ -192,7 +192,7 @@ function parseIntSafe(value, fallback) {
   const parsed = parseInt(value, 10);
   return isNaN(parsed) ? fallback : parsed;
 }
-var REPORT_TIMEZONE = "America/Los_Angeles";
+var REPORT_TIMEZONE = "America/New_York";
 function getTodayDateString() {
   const formatter = new Intl.DateTimeFormat("en-CA", {
     timeZone: REPORT_TIMEZONE,
@@ -218,8 +218,8 @@ function getDateRange(fromEnv, toEnv, singleEnv) {
     dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
     return { min: dayStart.toISOString(), max: dayEnd.toISOString() };
   }
-  const todayPT = getTodayDateString();
-  const [y, m, d] = todayPT.split("-").map(Number);
+  const todayEastern = getTodayDateString();
+  const [y, m, d] = todayEastern.split("-").map(Number);
   const localStart = new Date(y, (m || 1) - 1, d || 1);
   const localEnd = new Date(y, (m || 1) - 1, (d || 1) + 1);
   return { min: localStart.toISOString(), max: localEnd.toISOString() };
@@ -351,7 +351,7 @@ function buildProcessRepliesMessage(p) {
   const notCustomer = (p.outOfOffice ?? 0) + (p.autoReply ?? 0) + (p.notAReply ?? 0);
   const lines = [
     `\u{1F4EC} *Process Replies Report*`,
-    `Date: ${p.date}${p.runAtPT ? `  \xB7  Run: ${p.runAtPT}` : ""}${p.durationSec !== void 0 ? `  \xB7  ${p.durationSec}s` : ""}`,
+    `Date: ${p.date}${p.runAtET ? `  \xB7  Run: ${p.runAtET}` : ""}${p.durationSec !== void 0 ? `  \xB7  ${p.durationSec}s` : ""}`,
     `\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550`,
     ``,
     `*Inbox*`,
@@ -458,17 +458,29 @@ async function instantlyAddLeads(leads) {
         const uploaded = data.leads_uploaded ?? 0;
         const created = data.created_leads ?? [];
         totalSuccess += uploaded;
+        const seen = /* @__PURE__ */ new Set();
         for (const c of created) {
+          let leadId;
           if (typeof c.index === "number" && ((_a = batch[c.index]) == null ? void 0 : _a.id)) {
-            successIds.push(batch[c.index].id);
+            leadId = batch[c.index].id;
+          } else if (c.email) {
+            const match = batch.find((l) => l.email && String(l.email).toLowerCase() === String(c.email).toLowerCase());
+            leadId = match == null ? void 0 : match.id;
+          }
+          if (leadId && !seen.has(leadId)) {
+            seen.add(leadId);
+            successIds.push(leadId);
           }
         }
         const skipped = data.skipped_count ?? 0;
         const duped = data.duplicated_leads ?? 0;
         const invalid = data.invalid_email_count ?? 0;
         totalFailed += Math.max(0, batch.length - uploaded);
+        if (successIds.length > 0 && successIds.length !== created.length) {
+          console.log(`   \u26A0\uFE0F  Mapping: ${successIds.length} lead IDs from ${created.length} created_leads (deduped by id)`);
+        }
         console.log(
-          `   \u2705 Batch ${batchNum}/${totalBatches}: ${uploaded} uploaded, ${skipped} skipped, ${duped} duped, ${invalid} invalid`
+          `   \u2705 Batch ${batchNum}/${totalBatches}: ${uploaded} uploaded (${successIds.length} confirmed for DB), ${skipped} skipped, ${duped} duped, ${invalid} invalid`
         );
       } else {
         totalFailed += batch.length;
@@ -927,13 +939,13 @@ async function main() {
     if (fetchResult && process.env.SLACK_REPORT_CHANNEL) {
       const dateForReport = process.env.FETCH_DATE || process.env.REPORT_DATE || (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
       const durationSec = Math.round((Date.now() - fetchStartMs) / 1e3);
-      const runAtPT = (/* @__PURE__ */ new Date()).toLocaleString("en-US", {
-        timeZone: "America/Los_Angeles",
+      const runAtET = (/* @__PURE__ */ new Date()).toLocaleString("en-US", {
+        timeZone: "America/New_York",
         month: "short",
         day: "numeric",
         hour: "numeric",
         minute: "2-digit"
-      }) + " PT";
+      }) + " ET";
       const msg = buildProcessRepliesMessage({
         date: dateForReport,
         unreadCount: fetchResult.unreadCount,
@@ -946,7 +958,7 @@ async function main() {
         autoReply: fetchResult.auto_reply,
         notAReply: fetchResult.not_a_reply,
         autoReplied: fetchResult.hot,
-        runAtPT,
+        runAtET,
         durationSec
       });
       await postToReportChannel(msg);

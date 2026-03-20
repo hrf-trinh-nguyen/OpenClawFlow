@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Register 4 cron jobs per https://docs.openclaw.ai/automation/cron-jobs
-# Run from repo root: ./scripts/register-cron-jobs.sh
-# Requires: SLACK_REPORT_CHANNEL in .env (for 10PM job delivery)
+# Register 4 OpenClaw cron jobs (optional; primary scheduling is system crontab).
+# All schedules are US Eastern (America/New_York). Run: ./scripts/register-cron-jobs.sh
 
 set -e
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -13,17 +12,18 @@ if [ -f .env ]; then
   set +a
 fi
 
-openclaw cron add --name "3AM-5AM PT - Build List (Batched)" --cron "0 3-5 * * *" --tz "America/Los_Angeles" \
+TZ_ET="America/New_York"
+
+openclaw cron add --name "5–8 AM ET - Bouncer (Build List)" --cron "0 5,6,7,8 * * *" --tz "$TZ_ET" \
   --session isolated --no-deliver --message "Run workflow: build-list"
 
-openclaw cron add --name "5:15AM & 5:45AM PT - Load Campaign (Batched)" --cron "15,45 5 * * *" --tz "America/Los_Angeles" \
+openclaw cron add --name "5:30–8:30 AM ET - Load Campaign" --cron "30 5,6,7,8 * * *" --tz "$TZ_ET" \
   --session isolated --no-deliver --message "Run workflow: load-campaign"
 
-openclaw cron add --name "10AM–9PM PT - Process Replies (Hourly)" --cron "0 10-21 * * *" --tz "America/Los_Angeles" \
+openclaw cron add --name "10AM–9PM ET - Process Replies (Hourly)" --cron "0 10-21 * * *" --tz "$TZ_ET" \
   --session isolated --no-deliver --message "Run workflow: process-replies"
 
-# 10PM: deliver report to Slack
-openclaw cron add --name "10PM PT - Daily Report" --cron "0 22 * * *" --tz "America/Los_Angeles" \
+openclaw cron add --name "10PM ET - Daily Report" --cron "0 22 * * *" --tz "$TZ_ET" \
   --session isolated --message "Run workflow: daily-report" \
   --announce --channel slack --to "channel:${SLACK_REPORT_CHANNEL:-}"
 

@@ -62,9 +62,9 @@ export function parseIntSafe(value: string | undefined, fallback: number): numbe
 
 // ── Date Utilities ──────────────────────────────────────────────────
 
-const REPORT_TIMEZONE = 'America/Los_Angeles';
+const REPORT_TIMEZONE = 'America/New_York';
 
-/** Today's date in PT (America/Los_Angeles), YYYY-MM-DD. Use for report date, daily caps, etc. */
+/** Today's date in US Eastern (America/New_York, EST/EDT), YYYY-MM-DD. Reports, daily caps, Instantly date param, etc. */
 export function getTodayDateString(): string {
   const formatter = new Intl.DateTimeFormat('en-CA', {
     timeZone: REPORT_TIMEZONE,
@@ -97,9 +97,9 @@ export function getDateRange(
     return { min: dayStart.toISOString(), max: dayEnd.toISOString() };
   }
 
-  // Default: today in PT (boundaries depend on TZ=America/Los_Angeles when running)
-  const todayPT = getTodayDateString();
-  const [y, m, d] = todayPT.split('-').map(Number);
+  // Default: today in Eastern (see REPORT_TIMEZONE); local Date boundaries follow process TZ when set
+  const todayEastern = getTodayDateString();
+  const [y, m, d] = todayEastern.split('-').map(Number);
   const localStart = new Date(y, (m || 1) - 1, d || 1);
   const localEnd = new Date(y, (m || 1) - 1, (d || 1) + 1);
   return { min: localStart.toISOString(), max: localEnd.toISOString() };

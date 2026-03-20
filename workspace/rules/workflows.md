@@ -80,7 +80,7 @@ cd ~/.openclaw && source .env && LOAD_LIMIT=100 MODE=load node workspace/skills/
 
 ## process-replies
 
-**Purpose:** Fetch replies from Instantly and classify them with the LLM. **Default: today only** (0h-24h); never pulls all replies. Runs hourly 10AM–9PM Pacific Time.
+**Purpose:** Fetch replies from Instantly and classify them with the LLM. **Default: today only** (0h-24h); never pulls all replies. Runs hourly 10AM–9PM US Eastern.
 
 **Run:**
 

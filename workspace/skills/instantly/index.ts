@@ -15,7 +15,7 @@
  * - SUPABASE_DB_URL: PostgreSQL connection string (required)
  * - MODE: 'load' | 'fetch' | 'all' (default: 'all')
  * - LOAD_LIMIT: Max verified leads to load per run (default: 100)
- * - INSTANTLY_LOAD_DAILY_CAP: Max leads to push to Instantly per calendar day PT (default: 200)
+ * - INSTANTLY_LOAD_DAILY_CAP: Max leads to push per calendar day (US Eastern) (default: 200)
  * - FETCH_DATE: Single day YYYY-MM-DD (optional, defaults to today)
  * - FETCH_DATE_FROM + FETCH_DATE_TO: Date range (optional)
  */
@@ -742,13 +742,13 @@ async function main(): Promise<void> {
       const dateForReport =
         process.env.FETCH_DATE || process.env.REPORT_DATE || new Date().toISOString().split('T')[0];
       const durationSec = Math.round((Date.now() - fetchStartMs) / 1000);
-      const runAtPT = new Date().toLocaleString('en-US', {
-        timeZone: 'America/Los_Angeles',
+      const runAtET = new Date().toLocaleString('en-US', {
+        timeZone: 'America/New_York',
         month: 'short',
         day: 'numeric',
         hour: 'numeric',
         minute: '2-digit',
-      }) + ' PT';
+      }) + ' ET';
       const msg = buildProcessRepliesMessage({
         date: dateForReport,
         unreadCount: fetchResult.unreadCount,
@@ -761,7 +761,7 @@ async function main(): Promise<void> {
         autoReply: fetchResult.auto_reply,
         notAReply: fetchResult.not_a_reply,
         autoReplied: fetchResult.hot,
-        runAtPT,
+        runAtET,
         durationSec,
       });
       await postToReportChannel(msg);

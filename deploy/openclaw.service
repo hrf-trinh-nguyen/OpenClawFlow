@@ -8,7 +8,9 @@ Type=simple
 User=deploy
 WorkingDirectory=/home/deploy/openclaw-mvp
 # HOME must be explicit so openclaw resolves ~/.openclaw correctly
+# Eastern = reporting “today” and any date logic in child processes
 Environment=HOME=/home/deploy
+Environment=TZ=America/New_York
 Environment=PATH=/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/bin:/usr/bin:/bin
 EnvironmentFile=-/home/deploy/openclaw-mvp/.env
 ExecStart=/home/deploy/openclaw-mvp/scripts/start-openclaw.sh

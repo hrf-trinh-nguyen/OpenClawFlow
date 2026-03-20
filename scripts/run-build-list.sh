@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Bouncer: verify leads already in DB (e.g. from CSV import via Agent).
-# Runs 4x/day (5, 6, 7, 8 AM PT) to incrementally verify leads.
+# Runs 4x/day (5, 6, 7, 8 AM US Eastern) to incrementally verify leads.
 # No Apollo — use Agent + csv-import to add leads, then cron verifies.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

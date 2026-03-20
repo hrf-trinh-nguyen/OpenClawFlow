@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Common functions for OpenClaw shell scripts
-# All times and "today" are in Pacific (America/Los_Angeles).
+# All business dates/times use US Eastern (America/New_York, EST/EDT).
 
-# Ensure PT for cron and manual runs (crontab also sets TZ; this covers scripts run by hand)
-export TZ="${TZ:-America/Los_Angeles}"
+# Ensure Eastern for script output and Node child processes when run manually
+export TZ="${TZ:-America/New_York}"
 
 # ── Environment Setup ────────────────────────────────────────────────
 
@@ -60,14 +60,14 @@ try {
   const r = await pool.query(`
     SELECT COUNT(*)::int AS c FROM leads
     WHERE processing_status='bouncer_verified'
-      AND DATE(created_at AT TIME ZONE 'America/Los_Angeles') = (NOW() AT TIME ZONE 'America/Los_Angeles')::date
+      AND DATE(created_at AT TIME ZONE 'America/New_York') = (NOW() AT TIME ZONE 'America/New_York')::date
   `);
   console.log(r.rows[0]?.c ?? 0);
 } catch { console.log('0'); } finally { await pool.end(); }
 EOF
 }
 
-# Count leads marked instantly_loaded today (updated_at today, PT)
+# Count leads marked instantly_loaded today (updated_at today, Eastern)
 get_loaded_count_today() {
   node --input-type=module <<'EOF'
 import pg from 'pg';
@@ -78,14 +78,14 @@ try {
   const r = await pool.query(`
     SELECT COUNT(*)::int AS c FROM leads
     WHERE processing_status='instantly_loaded'
-      AND DATE(updated_at AT TIME ZONE 'America/Los_Angeles') = (NOW() AT TIME ZONE 'America/Los_Angeles')::date
+      AND DATE(updated_at AT TIME ZONE 'America/New_York') = (NOW() AT TIME ZONE 'America/New_York')::date
   `);
   console.log(r.rows[0]?.c ?? 0);
 } catch { console.log('0'); } finally { await pool.end(); }
 EOF
 }
 
-# Count leads inserted from Apollo today (created_at today, PT)
+# Count leads inserted from Apollo today (created_at today, Eastern)
 get_apollo_inserted_count_today() {
   node --input-type=module <<'EOF'
 import pg from 'pg';
@@ -96,7 +96,7 @@ try {
   const r = await pool.query(`
     SELECT COUNT(*)::int AS c FROM leads
     WHERE apollo_person_id IS NOT NULL
-      AND DATE(created_at AT TIME ZONE 'America/Los_Angeles') = (NOW() AT TIME ZONE 'America/Los_Angeles')::date
+      AND DATE(created_at AT TIME ZONE 'America/New_York') = (NOW() AT TIME ZONE 'America/New_York')::date
   `);
   console.log(r.rows[0]?.c ?? 0);
 } catch { console.log('0'); } finally { await pool.end(); }
@@ -177,14 +177,14 @@ try {
 EOF
 }
 
-# Current time in Pacific (for Slack report accuracy)
+# Current time in US Eastern (for Slack report accuracy)
 get_pt_timestamp() {
-  TZ=America/Los_Angeles date '+%b %d, %I:%M %p PT'
+  TZ=America/New_York date '+%b %d, %I:%M %p ET'
 }
 
-# Apollo runs/day guard (based on local state file, PT)
+# Apollo runs/day guard (based on local state file, Eastern calendar date)
 get_pt_date() {
-  TZ=America/Los_Angeles date +%F
+  TZ=America/New_York date +%F
 }
 
 apollo_run_guard() {

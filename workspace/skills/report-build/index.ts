@@ -176,19 +176,19 @@ async function main() {
     },
   };
 
-  const reportRunAtPT =
+  const reportRunAtET =
     new Date().toLocaleString('en-US', {
-      timeZone: 'America/Los_Angeles',
+      timeZone: 'America/New_York',
       month: 'short',
       day: 'numeric',
       hour: 'numeric',
       minute: '2-digit',
-    }) + ' PT';
+    }) + ' ET';
 
   const text = buildDailyReportMessage({
     reportDate,
     campaignIdShort: primaryCampaignId ? `${primaryCampaignId.slice(0, 8)}...` : undefined,
-    reportRunAtPT,
+    reportRunAtET,
     personIdsCount: person_ids_count,
     leadsPulled: leads_pulled,
     leadsValidated: leads_validated,

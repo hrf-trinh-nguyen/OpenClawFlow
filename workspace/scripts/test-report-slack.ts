@@ -16,21 +16,21 @@ import {
 
 const TEST_CHANNEL = process.env.SLACK_TEST_CHANNEL || 'C0ALRRHK61X';
 
-function getNowPT(): string {
+function getNowET(): string {
   return (
     new Date().toLocaleString('en-US', {
-      timeZone: 'America/Los_Angeles',
+      timeZone: 'America/New_York',
       month: 'short',
       day: 'numeric',
       hour: 'numeric',
       minute: '2-digit',
-    }) + ' PT'
+    }) + ' ET'
   );
 }
 
 async function main() {
   const today = new Date().toISOString().split('T')[0];
-  const runAtPT = getNowPT();
+  const runAtET = getNowET();
 
   // ── Sample Process Replies Report ─────────────────────────────────────
   const processRepliesText = buildProcessRepliesMessage({
@@ -45,7 +45,7 @@ async function main() {
     autoReply: 1,
     notAReply: 0,
     autoReplied: 2,
-    runAtPT,
+    runAtET,
     durationSec: 47,
   });
 
@@ -53,7 +53,7 @@ async function main() {
   const dailyReportText = buildDailyReportMessage({
     reportDate: today,
     campaignIdShort: '7ba49983...',
-    reportRunAtPT: runAtPT,
+    reportRunAtET: runAtET,
     personIdsCount: 150,
     leadsPulled: 120,
     leadsValidated: 95,

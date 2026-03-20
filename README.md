@@ -14,14 +14,14 @@ Outbound lead pipeline powered by **OpenClaw**: lead verification (Bouncer), cam
 
 ## Schedule (Crontab)
 
-**Important:** Cron uses server timezone (UTC). PT times shown for reference.
+**Business day:** US Eastern (`America/New_York`). **Cron on VPS:** UTC (see `cron/crontab.example`, EDT offsets documented there).
 
-| Job | PT Time | UTC Time | Script | Log |
-|-----|---------|----------|--------|-----|
-| Bouncer | 5, 6, 7, 8 AM | 12, 13, 14, 15 | `run-build-list.sh` | `logs/build-list.log` |
-| Load campaign | 5:30, 6:30, 7:30, 8:30 AM | 12:30, 13:30, 14:30, 15:30 | `run-load-campaign.sh` | `logs/load-campaign.log` |
-| Process replies | 10 AM – 9 PM (hourly) | 17–23, 0–4 | `run-process-replies.sh` | `logs/process-replies.log` |
-| Daily report | 10 PM | 05:00 | `run-daily-report.sh` | `logs/daily-report.log` |
+| Job | Eastern | UTC (EDT) | Script | Log |
+|-----|---------|-----------|--------|-----|
+| Bouncer | 5, 6, 7, 8 AM | 9–12 | `run-build-list.sh` | `logs/build-list.log` |
+| Load campaign | 5:30–8:30 AM | 9:30–12:30 | `run-load-campaign.sh` | `logs/load-campaign.log` |
+| Process replies | 10 AM – 9 PM (hourly) | 14–23, 0, 1 | `run-process-replies.sh` | `logs/process-replies.log` |
+| Daily report | 10 PM | 02:00 | `run-daily-report.sh` | `logs/daily-report.log` |
 
 See [cron/README.md](cron/README.md) for install and usage.
 

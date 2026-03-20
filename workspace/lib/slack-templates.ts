@@ -17,8 +17,8 @@ export interface ProcessRepliesParams {
   autoReply?: number;
   notAReply?: number;
   autoReplied: number;
-  /** Run time in PT e.g. "Mar 19, 2:15 PM PT" */
-  runAtPT?: string;
+  /** Run time in US Eastern e.g. "Mar 19, 2:15 PM ET" */
+  runAtET?: string;
   /** Duration in seconds */
   durationSec?: number;
 }
@@ -31,7 +31,7 @@ export function buildProcessRepliesMessage(p: ProcessRepliesParams): string {
 
   const lines = [
     `📬 *Process Replies Report*`,
-    `Date: ${p.date}${p.runAtPT ? `  ·  Run: ${p.runAtPT}` : ''}${p.durationSec !== undefined ? `  ·  ${p.durationSec}s` : ''}`,
+    `Date: ${p.date}${p.runAtET ? `  ·  Run: ${p.runAtET}` : ''}${p.durationSec !== undefined ? `  ·  ${p.durationSec}s` : ''}`,
     `═════════════════════════`,
     ``,
     `*Inbox*`,
@@ -60,8 +60,8 @@ export function buildProcessRepliesMessage(p: ProcessRepliesParams): string {
 export interface DailyReportParams {
   reportDate: string;
   campaignIdShort?: string;
-  /** Report generated at (PT) e.g. "Mar 19, 10:00 PM PT" */
-  reportRunAtPT?: string;
+  /** Report generated at (US Eastern) e.g. "Mar 19, 10:00 PM ET" */
+  reportRunAtET?: string;
   personIdsCount: number;
   leadsPulled: number;
   leadsValidated: number;
@@ -98,7 +98,7 @@ export function buildDailyReportMessage(p: DailyReportParams): string {
 
   const lines = [
     `📊 *OpenClaw Daily Report*`,
-    `Date: ${p.reportDate}${p.campaignIdShort ? `  ·  Campaign: ${p.campaignIdShort}` : ''}${p.reportRunAtPT ? `  ·  Generated: ${p.reportRunAtPT}` : ''}`,
+    `Date: ${p.reportDate}${p.campaignIdShort ? `  ·  Campaign: ${p.campaignIdShort}` : ''}${p.reportRunAtET ? `  ·  Generated: ${p.reportRunAtET}` : ''}`,
     `═════════════════════════`,
     ``,
     `*Lead Pipeline*`,

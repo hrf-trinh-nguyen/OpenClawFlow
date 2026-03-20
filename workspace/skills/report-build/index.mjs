@@ -37,6 +37,7 @@ function getDb() {
 }
 
 // lib/db/reports.ts
+var BUSINESS_TZ = "America/New_York";
 async function getMetricsForReport(client, reportDate) {
   var _a;
   const metrics = {
@@ -64,7 +65,7 @@ async function getMetricsForReport(client, reportDate) {
      FROM service_executions se
      JOIN pipeline_runs pr ON se.pipeline_run_id = pr.id
      WHERE pr.run_type = 'apollo_collection' AND se.service_name = 'apollo'
-       AND pr.completed_at::date = $1::date AND se.status = 'completed'`,
+       AND (pr.completed_at AT TIME ZONE '${BUSINESS_TZ}')::date = $1::date AND se.status = 'completed'`,
     [reportDate]
   );
   if (apolloRes.rows[0]) {
@@ -77,7 +78,7 @@ async function getMetricsForReport(client, reportDate) {
      FROM service_executions se
      JOIN pipeline_runs pr ON se.pipeline_run_id = pr.id
      WHERE pr.run_type = 'bouncer_verify' AND se.service_name = 'bouncer'
-       AND pr.completed_at::date = $1::date AND se.status = 'completed'`,
+       AND (pr.completed_at AT TIME ZONE '${BUSINESS_TZ}')::date = $1::date AND se.status = 'completed'`,
     [reportDate]
   );
   if (bouncerRes.rows[0]) {
@@ -90,7 +91,7 @@ async function getMetricsForReport(client, reportDate) {
      FROM service_executions se
      JOIN pipeline_runs pr ON se.pipeline_run_id = pr.id
      WHERE pr.run_type = 'instantly_load' AND se.service_name = 'instantly'
-       AND pr.completed_at::date = $1::date AND se.status = 'completed'`,
+       AND (pr.completed_at AT TIME ZONE '${BUSINESS_TZ}')::date = $1::date AND se.status = 'completed'`,
     [reportDate]
   );
   if (instRes.rows[0]) {
@@ -98,14 +99,14 @@ async function getMetricsForReport(client, reportDate) {
     metrics.pushed_failed = Number(instRes.rows[0].failed) || 0;
   }
   const repliesRes = await client.query(
-    `SELECT COUNT(*)::int as cnt FROM replies WHERE fetched_at::date = $1::date`,
+    `SELECT COUNT(*)::int as cnt FROM replies WHERE (fetched_at AT TIME ZONE '${BUSINESS_TZ}')::date = $1::date`,
     [reportDate]
   );
   metrics.replies_fetched = Number((_a = repliesRes.rows[0]) == null ? void 0 : _a.cnt) || 0;
   const repliesClassRes = await client.query(
     `SELECT reply_category as category, COUNT(*)::int as cnt
      FROM replies
-     WHERE reply_category IS NOT NULL AND classified_at::date = $1::date
+     WHERE reply_category IS NOT NULL AND (classified_at AT TIME ZONE '${BUSINESS_TZ}')::date = $1::date
      GROUP BY reply_category`,
     [reportDate]
   );
@@ -125,7 +126,7 @@ async function getMetricsForReport(client, reportDate) {
       `SELECT rc.category, COUNT(*)::int as cnt
        FROM reply_classifications rc
        JOIN replies r ON rc.reply_id = r.id
-       WHERE rc.classified_at::date = $1::date
+       WHERE (rc.classified_at AT TIME ZONE '${BUSINESS_TZ}')::date = $1::date
        GROUP BY rc.category`,
       [reportDate]
     );
@@ -247,7 +248,7 @@ function validateRequiredEnv(keys) {
     process.exit(1);
   }
 }
-var REPORT_TIMEZONE = "America/Los_Angeles";
+var REPORT_TIMEZONE = "America/New_York";
 function getTodayDateString() {
   const formatter = new Intl.DateTimeFormat("en-CA", {
     timeZone: REPORT_TIMEZONE,
@@ -302,7 +303,7 @@ function buildDailyReportMessage(p) {
   const totalClassified = p.repliesFetched;
   const lines = [
     `\u{1F4CA} *OpenClaw Daily Report*`,
-    `Date: ${p.reportDate}${p.campaignIdShort ? `  \xB7  Campaign: ${p.campaignIdShort}` : ""}${p.reportRunAtPT ? `  \xB7  Generated: ${p.reportRunAtPT}` : ""}`,
+    `Date: ${p.reportDate}${p.campaignIdShort ? `  \xB7  Campaign: ${p.campaignIdShort}` : ""}${p.reportRunAtET ? `  \xB7  Generated: ${p.reportRunAtET}` : ""}`,
     `\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550`,
     ``,
     `*Lead Pipeline*`,
@@ -456,17 +457,17 @@ async function main() {
       negative_rate: `${nr.toFixed(2)}%`
     }
   };
-  const reportRunAtPT = (/* @__PURE__ */ new Date()).toLocaleString("en-US", {
-    timeZone: "America/Los_Angeles",
+  const reportRunAtET = (/* @__PURE__ */ new Date()).toLocaleString("en-US", {
+    timeZone: "America/New_York",
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit"
-  }) + " PT";
+  }) + " ET";
   const text = buildDailyReportMessage({
     reportDate,
     campaignIdShort: primaryCampaignId ? `${primaryCampaignId.slice(0, 8)}...` : void 0,
-    reportRunAtPT,
+    reportRunAtET,
     personIdsCount: person_ids_count,
     leadsPulled: leads_pulled,
     leadsValidated: leads_validated,

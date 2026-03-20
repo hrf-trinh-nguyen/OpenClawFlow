@@ -134,13 +134,13 @@ export async function getLeadsByStatus(
   return result.rows;
 }
 
-/** Count of leads marked instantly_loaded today (America/Los_Angeles). */
+/** Count of leads marked instantly_loaded today (US Eastern). */
 export async function getInstantlyLoadedCountToday(client: DbClient): Promise<number> {
   const result = await client.query(
     `SELECT COUNT(*)::int AS c FROM leads
      WHERE processing_status = 'instantly_loaded'
-       AND (updated_at AT TIME ZONE 'America/Los_Angeles')::date =
-           (NOW() AT TIME ZONE 'America/Los_Angeles')::date`
+       AND (updated_at AT TIME ZONE 'America/New_York')::date =
+           (NOW() AT TIME ZONE 'America/New_York')::date`
   );
   return Number(result.rows[0]?.c ?? 0);
 }
