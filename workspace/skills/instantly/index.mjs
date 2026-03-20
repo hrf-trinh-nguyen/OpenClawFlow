@@ -284,7 +284,7 @@ var API_ENDPOINTS = {
   }
 };
 var HOT_REPLY_TEMPLATE = {
-  BOOK_NOW_URL: "https://meet.designpickle.com/campaign/ob-demo?ref=outbound",
+  BOOK_NOW_URL: "https://meet.designpickle.com/campaign/ob-demo-response",
   COMPARE_URL: "https://designpickle.com/comparison"
 };
 var CLASSIFICATION_MODEL = process.env.REPLY_CLASSIFICATION_MODEL || "gpt-4o";

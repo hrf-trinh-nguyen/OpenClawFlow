@@ -129,7 +129,7 @@ export const APOLLO_ICP_DEFAULTS = {
 // ── Hot Reply Template ──────────────────────────────────────────────
 
 export const HOT_REPLY_TEMPLATE = {
-  BOOK_NOW_URL: 'https://meet.designpickle.com/campaign/ob-demo?ref=outbound',
+  BOOK_NOW_URL: 'https://meet.designpickle.com/campaign/ob-demo-response',
   COMPARE_URL: 'https://designpickle.com/comparison',
 } as const;
 
