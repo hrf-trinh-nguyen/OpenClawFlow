@@ -32,10 +32,10 @@ Use this if your team or VPS operators work from Vietnam. ICT does not observe D
 | Process replies (hourly) | 10 AM → 9 PM | 14 → 23, then 0, 1 | 21:00 → 08:00 next morning (12 runs per US Eastern “business day”) |
 | Daily report | 10 PM | 02:00 (next UTC calendar day) | 09:00 morning |
 
-**Daily targets:**
+**Daily targets (defaults; override in `.env`):**
 
-- Bouncer: 300 verified/day (4 runs × ~75 each)
-- Load: 250 pushed/day (4 runs × ~63 each)
+- Bouncer: up to `BOUNCER_DAILY_CAP` verified/day (default 600)
+- Load: up to `INSTANTLY_LOAD_DAILY_CAP` pushed/day (default 600); each run caps at `LOAD_LIMIT` (default 200)
 
 ---
 

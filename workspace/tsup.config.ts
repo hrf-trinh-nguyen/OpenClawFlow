@@ -16,6 +16,7 @@ export default defineConfig({
     'skills/csv-import/index':     'skills/csv-import/index.ts',
     'skills/reply-by-category/index': 'skills/reply-by-category/index.ts',
     // Shared libraries
+    'lib/constants':         'lib/constants.ts',
     'lib/supabase-pipeline': 'lib/supabase-pipeline.ts',
     'lib/supabase-legacy':   'lib/supabase-legacy.ts',
     // Scripts

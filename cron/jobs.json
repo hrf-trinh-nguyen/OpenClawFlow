@@ -50,7 +50,7 @@
       "wakeMode": "now",
       "payload": {
         "kind": "agentTurn",
-        "message": "Run workflow: load-campaign\n\nCron mode: keep this run short. Load at most 100 verified leads this turn (LOAD_LIMIT=100), then stop and report summary to Slack channel C0A5S86QH9D. If any error occurs, report it to Slack channel C0ALRRHK61X."
+        "message": "Run workflow: load-campaign\n\nCron mode: keep this run short. Load at most 200 verified leads this turn (LOAD_LIMIT=200), then stop and report summary to Slack channel C0A5S86QH9D. If any error occurs, report it to Slack channel C0ALRRHK61X."
       },
       "delivery": {
         "mode": "announce",

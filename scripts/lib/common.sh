@@ -21,6 +21,32 @@ load_env() {
   fi
 }
 
+# Fill LOAD_LIMIT / INSTANTLY_LOAD_DAILY_CAP / BOUNCER_DAILY_CAP when missing.
+# Numeric fallbacks come from workspace/lib/constants.mjs → FALLBACK_LIMITS (run: npm run build in workspace).
+# Prefer setting all three in .env — then this only acts as safety net.
+apply_limit_env_defaults() {
+  local fb_load=200 fb_inst=600 fb_bouncer=600
+  if [ -n "${REPO_ROOT:-}" ] && [ -f "$REPO_ROOT/workspace/lib/constants.mjs" ]; then
+    local line
+    line="$(
+      cd "$REPO_ROOT" && node --input-type=module -e "
+        import { FALLBACK_LIMITS } from './workspace/lib/constants.mjs';
+        process.stdout.write(
+          FALLBACK_LIMITS.LOAD_LIMIT + ' ' +
+          FALLBACK_LIMITS.INSTANTLY_LOAD_DAILY_CAP + ' ' +
+          FALLBACK_LIMITS.BOUNCER_DAILY_CAP
+        );
+      " 2>/dev/null
+    )" || line=""
+    if [ -n "$line" ]; then
+      read -r fb_load fb_inst fb_bouncer <<< "$line"
+    fi
+  fi
+  : "${LOAD_LIMIT:=${fb_load}}"
+  : "${INSTANTLY_LOAD_DAILY_CAP:=${fb_inst}}"
+  : "${BOUNCER_DAILY_CAP:=${fb_bouncer}}"
+}
+
 # ── Slack Notifications ──────────────────────────────────────────────
 
 post_slack() {

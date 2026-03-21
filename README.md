@@ -7,8 +7,8 @@ Outbound lead pipeline powered by **OpenClaw**: lead verification (Bouncer), cam
 | Step | Description |
 |------|-------------|
 | **Lead source** | Agent + **csv-import** (CSV or Google Sheet) → leads in DB with `processing_status=apollo_matched` |
-| **Bouncer** | Cron verifies emails (Bouncer API), updates to `bouncer_verified` or `failed`. Daily cap: `BOUNCER_DAILY_CAP` (default 300). |
-| **Load campaign** | Cron pushes verified leads to Instantly. Daily cap: `INSTANTLY_LOAD_DAILY_CAP` (default 250). |
+| **Bouncer** | Cron verifies emails (Bouncer API), updates to `bouncer_verified` or `failed`. Daily cap: `BOUNCER_DAILY_CAP` (default 600). |
+| **Load campaign** | Cron pushes verified leads to Instantly. Daily cap: `INSTANTLY_LOAD_DAILY_CAP` (default 600); per run: `LOAD_LIMIT` (default 200). |
 | **Process replies** | Cron fetches inbox, classifies replies (hot/soft/objection/negative), auto-replies to hot leads. |
 | **Daily report** | Cron aggregates metrics and posts to Slack. |
 
@@ -75,7 +75,7 @@ Copy `.env.example` to `.env` (repo root or `~/.openclaw/.env`) and set:
 | `BOUNCER_API_KEY` | Bouncer email verification |
 | `BOUNCER_DAILY_CAP` | Max leads to verify per day (default 300) |
 | `INSTANTLY_API_KEY`, `INSTANTLY_CAMPAIGN_ID` | Instantly campaign |
-| `INSTANTLY_LOAD_DAILY_CAP` | Max leads to push to Instantly per day (default 250) |
+| `INSTANTLY_LOAD_DAILY_CAP` | Max leads to push to Instantly per day (default 600) |
 | `SUPABASE_DB_URL` | PostgreSQL connection string |
 
 ### 3. Gateway
@@ -122,12 +122,17 @@ When chatting with the agent (Slack or CLI), you can:
 - **Workflows:** “Run workflow: load-campaign”, “Run workflow: process-replies”, “Run workflow: daily-report” (see `workspace/rules/workflows.md`).
 - **Single skills:** e.g. run bouncer, instantly, report-build, slack-notify directly.
 
-## Daily caps (ENV)
+## Pipeline limits (ENV)
 
-- **Bouncer:** `BOUNCER_DAILY_CAP` (default 300). Only this many leads are verified per day (PT).
-- **Instantly load:** `INSTANTLY_LOAD_DAILY_CAP` (default 250). Only this many verified leads are pushed to Instantly per day.
+Tune these in **`.env`** only — Node reads them via `workspace/lib/constants.ts`; shell cron uses the same names after `load_env` (fallbacks match **`FALLBACK_LIMITS`** in that file; run `npm run build` in `workspace/` so `lib/constants.mjs` exists for shell defaults).
 
-Change these in `.env`; no code change required.
+| Variable | Role |
+|----------|------|
+| `LOAD_LIMIT` | Max verified leads per Instantly **batch** (each cron run). |
+| `INSTANTLY_LOAD_DAILY_CAP` | Max leads pushed to Instantly per **Eastern calendar day**. |
+| `BOUNCER_DAILY_CAP` | Max new `bouncer_verified` per **Eastern calendar day** (Bouncer cron). |
+
+If a key is missing from `.env`, defaults come from **`FALLBACK_LIMITS`** in `constants.ts` (change numbers there to change global fallbacks).
 
 ## References
 

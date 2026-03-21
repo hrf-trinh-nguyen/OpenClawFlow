@@ -11,8 +11,9 @@ source "$SCRIPT_DIR/lib/common.sh"
 
 setup_repo_root
 load_env
+apply_limit_env_defaults
 
-BOUNCER_DAILY_CAP="${BOUNCER_DAILY_CAP:-300}"
+BOUNCER_DAILY_CAP="${BOUNCER_DAILY_CAP}"
 VERIFIED_TODAY=$(get_verified_count_today)
 REMAINING=$((BOUNCER_DAILY_CAP - VERIFIED_TODAY))
 

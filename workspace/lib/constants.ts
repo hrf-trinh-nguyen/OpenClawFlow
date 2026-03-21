@@ -2,6 +2,8 @@
  * Shared constants for OpenClaw skills
  */
 
+import { parseIntSafe } from './utils.js';
+
 // ── Lead Processing Statuses ────────────────────────────────────────
 
 export const LEAD_STATUSES = [
@@ -57,16 +59,44 @@ export const RATE_LIMITS = {
   BOUNCER_DELAY_BETWEEN_BATCHES_MS: 1000,
 } as const;
 
+// ── Pipeline limits (ENV + single fallback table) ─────────────────
+
+/** Env var names — set these in `.env` to tune limits; same keys are used by shell scripts after `load_env`. */
+export const LIMIT_ENV = {
+  LOAD_LIMIT: 'LOAD_LIMIT',
+  INSTANTLY_LOAD_DAILY_CAP: 'INSTANTLY_LOAD_DAILY_CAP',
+  BOUNCER_DAILY_CAP: 'BOUNCER_DAILY_CAP',
+} as const;
+
+/**
+ * Fallback numbers when an env var is unset (single place to edit defaults).
+ * Shell `apply_limit_env_defaults` reads these from the built `lib/constants.mjs`.
+ */
+export const FALLBACK_LIMITS = {
+  LOAD_LIMIT: 200,
+  INSTANTLY_LOAD_DAILY_CAP: 600,
+  BOUNCER_DAILY_CAP: 600,
+} as const;
+
 // ── Default Values ──────────────────────────────────────────────────
 
 export const DEFAULTS = {
   TARGET_COUNT: 5,
-  LOAD_LIMIT: 100,
-  /** Max leads to push to Instantly per calendar day (US Eastern). Env: INSTANTLY_LOAD_DAILY_CAP */
-  INSTANTLY_LOAD_DAILY_CAP: 250,
+  /** Max verified leads per Instantly run — from `process.env.LOAD_LIMIT` or FALLBACK_LIMITS */
+  LOAD_LIMIT: parseIntSafe(process.env[LIMIT_ENV.LOAD_LIMIT], FALLBACK_LIMITS.LOAD_LIMIT),
+  /** Max pushes to Instantly per Eastern calendar day */
+  INSTANTLY_LOAD_DAILY_CAP: parseIntSafe(
+    process.env[LIMIT_ENV.INSTANTLY_LOAD_DAILY_CAP],
+    FALLBACK_LIMITS.INSTANTLY_LOAD_DAILY_CAP
+  ),
+  /** Max bouncer_verified counted per Eastern day (shell/cron enforces) */
+  BOUNCER_DAILY_CAP: parseIntSafe(
+    process.env[LIMIT_ENV.BOUNCER_DAILY_CAP],
+    FALLBACK_LIMITS.BOUNCER_DAILY_CAP
+  ),
   BOUNCER_BATCH_SIZE: 1000,
   FETCH_LIMIT: 100,
-} as const;
+};
 
 // ── Slack Channels ──────────────────────────────────────────────────
 
@@ -127,6 +157,7 @@ export const APOLLO_ICP_DEFAULTS = {
 } as const;
 
 // ── Hot Reply Template ──────────────────────────────────────────────
+// Single source of truth for auto-reply links. Import from here only (instantly, reply-by-category).
 
 export const HOT_REPLY_TEMPLATE = {
   BOOK_NOW_URL: 'https://meet.designpickle.com/campaign/ob-demo-response',

@@ -117,7 +117,7 @@ For full commands, read `rules/workflows.md` and `rules/flexible-pipeline-execut
 **Quick ref:** Parse natural language → params. Services pull by `processing_status`. Resume supported.
 
 - Apollo: `TARGET_COUNT=500` (parse from user). Bouncer: no params (pulls `apollo_matched`). Instantly: `MODE=load` or `MODE=fetch`. Report: `REPORT_DATE=YYYY-MM-DD`.
-- For short manual runs to avoid timeout: build-list single batch = `TARGET_COUNT=100` + one bouncer pass; load-campaign single batch = `LOAD_LIMIT=100 MODE=load`.
+- For short manual runs to avoid timeout: build-list single batch = `TARGET_COUNT=100` + one bouncer pass; load-campaign single batch = `LOAD_LIMIT=200 MODE=load` (defaults in `workspace/lib/constants.ts`).
 - lead-stats: no params. lead-move: `FROM_STATUS`, `TO_STATUS`, optional `LIMIT`. lead-delete: `DELETE_STATUS`, optional `LIMIT`.
 - Verify N failed again: move N→apollo_matched, then run bouncer.
 

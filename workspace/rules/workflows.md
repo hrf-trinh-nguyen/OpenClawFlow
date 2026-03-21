@@ -55,10 +55,10 @@ cd ~/.openclaw && source .env && TARGET_COUNT=100 node workspace/skills/apollo/i
 
 1. **Instantly service (load)** — pull up to 100 `bouncer_verified` leads from DB, add to Instantly, set `instantly_loaded`
    ```bash
-   cd ~/.openclaw && source .env && LOAD_LIMIT=100 MODE=load node workspace/skills/instantly/index.mjs
+   cd ~/.openclaw && source .env && LOAD_LIMIT=200 MODE=load node workspace/skills/instantly/index.mjs
    ```
 
-**For cron:** Keep each load run bounded to `LOAD_LIMIT=100` so large verified batches do not cause long agent turns.
+**For cron:** Each load run uses `LOAD_LIMIT` (default 200) so batches stay bounded.
 
 **After completing:** Report step summary to Slack channel `C0A5S86QH9D`. Report any errors to `C0ALRRHK61X`.
 
@@ -73,7 +73,7 @@ LOAD_LIMIT=50 ./scripts/run-load-campaign.sh
 
 **Alternative: Run skill directly:**
 ```bash
-cd ~/.openclaw && source .env && LOAD_LIMIT=100 MODE=load node workspace/skills/instantly/index.mjs
+cd ~/.openclaw && source .env && LOAD_LIMIT=200 MODE=load node workspace/skills/instantly/index.mjs
 ```
 
 ---

@@ -33,6 +33,11 @@ function validateRequiredEnv(keys) {
     process.exit(1);
   }
 }
+function parseIntSafe(value, fallback) {
+  if (!value) return fallback;
+  const parsed = parseInt(value, 10);
+  return isNaN(parsed) ? fallback : parsed;
+}
 
 // lib/constants.ts
 var CUSTOMER_REPLY_CATEGORIES = ["hot", "soft", "objection", "negative"];
@@ -41,6 +46,33 @@ var REPLY_CATEGORIES = [
   ...CUSTOMER_REPLY_CATEGORIES,
   ...NON_REPLY_CATEGORIES
 ];
+var LIMIT_ENV = {
+  LOAD_LIMIT: "LOAD_LIMIT",
+  INSTANTLY_LOAD_DAILY_CAP: "INSTANTLY_LOAD_DAILY_CAP",
+  BOUNCER_DAILY_CAP: "BOUNCER_DAILY_CAP"
+};
+var FALLBACK_LIMITS = {
+  LOAD_LIMIT: 200,
+  INSTANTLY_LOAD_DAILY_CAP: 600,
+  BOUNCER_DAILY_CAP: 600
+};
+var DEFAULTS = {
+  TARGET_COUNT: 5,
+  /** Max verified leads per Instantly run — from `process.env.LOAD_LIMIT` or FALLBACK_LIMITS */
+  LOAD_LIMIT: parseIntSafe(process.env[LIMIT_ENV.LOAD_LIMIT], FALLBACK_LIMITS.LOAD_LIMIT),
+  /** Max pushes to Instantly per Eastern calendar day */
+  INSTANTLY_LOAD_DAILY_CAP: parseIntSafe(
+    process.env[LIMIT_ENV.INSTANTLY_LOAD_DAILY_CAP],
+    FALLBACK_LIMITS.INSTANTLY_LOAD_DAILY_CAP
+  ),
+  /** Max bouncer_verified counted per Eastern day (shell/cron enforces) */
+  BOUNCER_DAILY_CAP: parseIntSafe(
+    process.env[LIMIT_ENV.BOUNCER_DAILY_CAP],
+    FALLBACK_LIMITS.BOUNCER_DAILY_CAP
+  ),
+  BOUNCER_BATCH_SIZE: 1e3,
+  FETCH_LIMIT: 100
+};
 var SLACK_CHANNELS = {
   REPORT: process.env.SLACK_REPORT_CHANNEL || "",
   ALERT: process.env.SLACK_ALERT_CHANNEL || ""

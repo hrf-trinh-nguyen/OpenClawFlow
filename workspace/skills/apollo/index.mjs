@@ -249,11 +249,30 @@ var RATE_LIMITS = {
   BOUNCER_MAX_WAIT_MS: 3e5,
   BOUNCER_DELAY_BETWEEN_BATCHES_MS: 1e3
 };
+var LIMIT_ENV = {
+  LOAD_LIMIT: "LOAD_LIMIT",
+  INSTANTLY_LOAD_DAILY_CAP: "INSTANTLY_LOAD_DAILY_CAP",
+  BOUNCER_DAILY_CAP: "BOUNCER_DAILY_CAP"
+};
+var FALLBACK_LIMITS = {
+  LOAD_LIMIT: 200,
+  INSTANTLY_LOAD_DAILY_CAP: 600,
+  BOUNCER_DAILY_CAP: 600
+};
 var DEFAULTS = {
   TARGET_COUNT: 5,
-  LOAD_LIMIT: 100,
-  /** Max leads to push to Instantly per calendar day (PT). Env: INSTANTLY_LOAD_DAILY_CAP */
-  INSTANTLY_LOAD_DAILY_CAP: 250,
+  /** Max verified leads per Instantly run — from `process.env.LOAD_LIMIT` or FALLBACK_LIMITS */
+  LOAD_LIMIT: parseIntSafe(process.env[LIMIT_ENV.LOAD_LIMIT], FALLBACK_LIMITS.LOAD_LIMIT),
+  /** Max pushes to Instantly per Eastern calendar day */
+  INSTANTLY_LOAD_DAILY_CAP: parseIntSafe(
+    process.env[LIMIT_ENV.INSTANTLY_LOAD_DAILY_CAP],
+    FALLBACK_LIMITS.INSTANTLY_LOAD_DAILY_CAP
+  ),
+  /** Max bouncer_verified counted per Eastern day (shell/cron enforces) */
+  BOUNCER_DAILY_CAP: parseIntSafe(
+    process.env[LIMIT_ENV.BOUNCER_DAILY_CAP],
+    FALLBACK_LIMITS.BOUNCER_DAILY_CAP
+  ),
   BOUNCER_BATCH_SIZE: 1e3,
   FETCH_LIMIT: 100
 };

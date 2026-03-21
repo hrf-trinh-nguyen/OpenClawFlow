@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Load Campaign: push verified leads to Instantly.
 # Runs 4x/day (5:30, 6:30, 7:30, 8:30 AM US Eastern) to incrementally load leads.
-# Daily cap: INSTANTLY_LOAD_DAILY_CAP (default 250).
+# Daily cap: INSTANTLY_LOAD_DAILY_CAP (default 600). Per-run: LOAD_LIMIT (default 200).
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib/common.sh
@@ -11,8 +11,9 @@ source "$SCRIPT_DIR/lib/common.sh"
 
 setup_repo_root
 load_env
+apply_limit_env_defaults
 
-CAP="${INSTANTLY_LOAD_DAILY_CAP:-250}"
+CAP="${INSTANTLY_LOAD_DAILY_CAP}"
 LOADED_TODAY=$(get_loaded_count_today)
 REMAINING=$((CAP - LOADED_TODAY))
 
@@ -28,8 +29,8 @@ if [ "$VERIFIED_COUNT" -eq 0 ]; then
   exit 0
 fi
 
-# Limit per run: min of remaining cap and available verified leads
-LOAD_LIMIT="${LOAD_LIMIT:-100}"
+# Limit per run: min of remaining cap and available verified leads (from .env / FALLBACK_LIMITS)
+LOAD_LIMIT="${LOAD_LIMIT}"
 if [ "$REMAINING" -lt "$LOAD_LIMIT" ]; then
   LOAD_LIMIT="$REMAINING"
 fi

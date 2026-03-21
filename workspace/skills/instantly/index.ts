@@ -14,8 +14,8 @@
  * - OPENAI_API_KEY: OpenAI API key for reply classification (required for fetch mode)
  * - SUPABASE_DB_URL: PostgreSQL connection string (required)
  * - MODE: 'load' | 'fetch' | 'all' (default: 'all')
- * - LOAD_LIMIT: Max verified leads to load per run (default: 100)
- * - INSTANTLY_LOAD_DAILY_CAP: Max leads to push per calendar day (US Eastern) (default: 200)
+ * - LOAD_LIMIT: Max verified leads to load per run (default: 200)
+ * - INSTANTLY_LOAD_DAILY_CAP: Max leads to push per calendar day (US Eastern) (default: 600)
  * - FETCH_DATE: Single day YYYY-MM-DD (optional, defaults to today)
  * - FETCH_DATE_FROM + FETCH_DATE_TO: Date range (optional)
  */
@@ -35,7 +35,6 @@ import {
   parseJsonSafe,
   validateRequiredEnv,
   getDateRange,
-  parseIntSafe,
 } from '../../lib/utils.js';
 import {
   RATE_LIMITS,
@@ -59,11 +58,9 @@ const INSTANTLY_API_KEY = process.env.INSTANTLY_API_KEY;
 const INSTANTLY_CAMPAIGN_ID = process.env.INSTANTLY_CAMPAIGN_ID;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const MODE = process.env.MODE || 'all';
-const LOAD_LIMIT = parseIntSafe(process.env.LOAD_LIMIT, DEFAULTS.LOAD_LIMIT);
-const LOAD_DAILY_CAP = parseIntSafe(
-  process.env.INSTANTLY_LOAD_DAILY_CAP,
-  DEFAULTS.INSTANTLY_LOAD_DAILY_CAP
-);
+/** Per-run batch + daily cap: resolved in `constants.ts` from ENV (same keys as `.env`). */
+const LOAD_LIMIT = DEFAULTS.LOAD_LIMIT;
+const LOAD_DAILY_CAP = DEFAULTS.INSTANTLY_LOAD_DAILY_CAP;
 
 // ── Validation ─────────────────────────────────────────────────────
 
