@@ -215,12 +215,20 @@ var RATE_LIMITS = {
 var LIMIT_ENV = {
   LOAD_LIMIT: "LOAD_LIMIT",
   INSTANTLY_LOAD_DAILY_CAP: "INSTANTLY_LOAD_DAILY_CAP",
-  BOUNCER_DAILY_CAP: "BOUNCER_DAILY_CAP"
+  BOUNCER_DAILY_CAP: "BOUNCER_DAILY_CAP",
+  /** Bouncer API chunk size (emails per submit). */
+  BOUNCER_BATCH_SIZE: "BOUNCER_BATCH_SIZE",
+  /** Max leads verified per cron run (shell `run-build-list.sh`; should align with batch size). */
+  BOUNCER_PER_RUN_MAX: "BOUNCER_PER_RUN_MAX"
 };
 var FALLBACK_LIMITS = {
   LOAD_LIMIT: 200,
   INSTANTLY_LOAD_DAILY_CAP: 600,
-  BOUNCER_DAILY_CAP: 600
+  BOUNCER_DAILY_CAP: 600,
+  /** Emails per Bouncer batch submit (API + cron pacing). */
+  BOUNCER_BATCH_SIZE: 100,
+  /** Max leads per `run-build-list.sh` invocation (cron retries every 10 min until daily cap). */
+  BOUNCER_PER_RUN_MAX: 100
 };
 var DEFAULTS = {
   TARGET_COUNT: 5,
@@ -236,7 +244,10 @@ var DEFAULTS = {
     process.env[LIMIT_ENV.BOUNCER_DAILY_CAP],
     FALLBACK_LIMITS.BOUNCER_DAILY_CAP
   ),
-  BOUNCER_BATCH_SIZE: 1e3,
+  BOUNCER_BATCH_SIZE: parseIntSafe(
+    process.env[LIMIT_ENV.BOUNCER_BATCH_SIZE],
+    FALLBACK_LIMITS.BOUNCER_BATCH_SIZE
+  ),
   FETCH_LIMIT: 100
 };
 var SLACK_CHANNELS = {
@@ -269,7 +280,58 @@ var API_ENDPOINTS = {
 };
 var CLASSIFICATION_MODEL = process.env.REPLY_CLASSIFICATION_MODEL || "gpt-4o";
 
+// lib/slack-templates.ts
+async function postSlackMessage(channel, text) {
+  const token = process.env.SLACK_BOT_TOKEN;
+  if (!token || !channel) return false;
+  try {
+    const res = await fetch("https://slack.com/api/chat.postMessage", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ channel, text })
+    });
+    if (!res.ok) return false;
+    const json = await res.json();
+    return json.ok === true;
+  } catch {
+    return false;
+  }
+}
+function postToAlertChannel(text) {
+  const channel = process.env.SLACK_ALERT_CHANNEL || "";
+  return postSlackMessage(channel, text);
+}
+
 // skills/bouncer/index.ts
+import { mkdirSync, writeFileSync } from "fs";
+import { join } from "path";
+var BOUNCER_STATUS_DELIVERABLE = "deliverable";
+var BOUNCER_STATUS_UNDELIVERABLE = "undeliverable";
+var PAUSE_FILENAME = "bouncer-paused";
+function repoRootForState() {
+  return process.env.OPENCLAW_HOME || process.cwd();
+}
+function writeBouncerApiPauseFile(reason) {
+  try {
+    const dir = join(repoRootForState(), "state");
+    mkdirSync(dir, { recursive: true });
+    const body = [
+      `paused_at=${(/* @__PURE__ */ new Date()).toISOString()}`,
+      `reason=${reason.replace(/\n/g, " ")}`,
+      "",
+      "Auto-cleared after a successful Bouncer run, or delete this file manually."
+    ].join("\n");
+    writeFileSync(join(dir, PAUSE_FILENAME), body, "utf8");
+    console.error(
+      `   \u23F8\uFE0F  Bouncer paused: wrote ${join(dir, PAUSE_FILENAME)} \u2014 cron will skip Bouncer until resolved.`
+    );
+  } catch (e) {
+    console.error("   \u26A0\uFE0F  Could not write pause file:", e);
+  }
+}
 validateRequiredEnv(["BOUNCER_API_KEY", "SUPABASE_DB_URL"]);
 var BOUNCER_API_KEY = process.env.BOUNCER_API_KEY;
 var BOUNCER_BATCH_SIZE = clamp(
@@ -341,6 +403,35 @@ async function bouncerPollBatch(batchId, maxWaitMs = RATE_LIMITS.BOUNCER_MAX_WAI
   }
   throw new Error(`Bouncer batch timed out after ${maxWaitMs / 1e3}s`);
 }
+function partitionBouncerResults(results, uniqueBatch, emailsSent) {
+  const seen = /* @__PURE__ */ new Set();
+  const deliverableIds = [];
+  const failedIds = [];
+  for (const result of results) {
+    const email = typeof (result == null ? void 0 : result.email) === "string" ? result.email.trim() : "";
+    if (!email) continue;
+    seen.add(email);
+    const norm = String((result == null ? void 0 : result.status) ?? "").toLowerCase().trim();
+    const lead = uniqueBatch.find((l) => l.email === email);
+    if (!(lead == null ? void 0 : lead.id)) continue;
+    if (norm === BOUNCER_STATUS_DELIVERABLE) {
+      deliverableIds.push(lead.id);
+    } else if (norm === BOUNCER_STATUS_UNDELIVERABLE) {
+      failedIds.push(lead.id);
+    } else {
+      return {
+        ok: false,
+        reason: `Unexpected Bouncer status "${norm || "(empty)"}" for \`${email}\`. Only deliverable + undeliverable are auto-handled; risky/unknown stops the run.`
+      };
+    }
+  }
+  for (const e of emailsSent) {
+    if (!seen.has(e)) {
+      return { ok: false, reason: `Bouncer response missing result row for \`${e}\`` };
+    }
+  }
+  return { ok: true, deliverableIds, failedIds };
+}
 async function main() {
   console.log(`
 \u{1F50D} Bouncer Service Starting`);
@@ -373,8 +464,11 @@ async function main() {
   let totalInvalid = 0;
   let apiCallsMade = 0;
   let apiErrors = 0;
+  let pipelineAborted = false;
+  let abortReason = "";
   try {
     for (let i = 0; i < pendingLeads.length; i += BOUNCER_BATCH_SIZE) {
+      if (pipelineAborted) break;
       const batch = pendingLeads.slice(i, i + BOUNCER_BATCH_SIZE);
       const batchNum = Math.floor(i / BOUNCER_BATCH_SIZE) + 1;
       const totalBatches = Math.ceil(pendingLeads.length / BOUNCER_BATCH_SIZE);
@@ -408,36 +502,46 @@ async function main() {
         console.log(`   \u2705 Submitted batch: ${batchId}`);
         const results = await bouncerPollBatch(batchId);
         apiCallsMade++;
-        const deliverableIds = [];
-        const failedIds = [];
-        for (const result of results) {
-          const lead = uniqueBatch.find((l) => l.email === result.email);
-          if (!lead || !lead.id) continue;
-          if (result.status === "deliverable") {
-            deliverableIds.push(lead.id);
-            totalDeliverable++;
-          } else {
-            failedIds.push(lead.id);
-            totalInvalid++;
-          }
+        const part = partitionBouncerResults(results, uniqueBatch, emails);
+        if (!part.ok) {
+          const detail = `Batch ${batchNum}/${totalBatches} \u2014 ${part.reason}`;
+          console.error(`   \u274C ${detail}
+`);
+          const slackText = [
+            `\u{1F6A8} *Bouncer STOPPED* (unexpected result \u2014 not a normal undeliverable email)`,
+            detail,
+            `Batch id: \`${batchId}\``,
+            `_No further batches this run. Leads in this batch were not updated._`
+          ].join("\n");
+          await postToAlertChannel(slackText);
+          await updateServiceExecution(db, execId, {
+            status: "failed",
+            completed_at: /* @__PURE__ */ new Date(),
+            api_errors: 1,
+            error_message: part.reason
+          });
+          abortReason = part.reason;
+          pipelineAborted = true;
+          break;
         }
+        const { deliverableIds, failedIds } = part;
         if (deliverableIds.length > 0) {
           await batchUpdateLeadStatus(db, deliverableIds, "bouncer_verified");
-          await db.query(
-            `UPDATE leads SET email_status = 'deliverable' WHERE id = ANY($1::uuid[])`,
-            [deliverableIds]
-          );
+          await db.query(`UPDATE leads SET email_status = 'deliverable' WHERE id = ANY($1::uuid[])`, [
+            deliverableIds
+          ]);
         }
         if (failedIds.length > 0) {
           await batchUpdateLeadStatus(db, failedIds, "failed", "Email not deliverable");
-          await db.query(
-            `UPDATE leads SET email_status = 'undeliverable' WHERE id = ANY($1::uuid[])`,
-            [failedIds]
-          );
+          await db.query(`UPDATE leads SET email_status = 'undeliverable' WHERE id = ANY($1::uuid[])`, [
+            failedIds
+          ]);
         }
+        totalDeliverable += deliverableIds.length;
+        totalInvalid += failedIds.length;
         totalProcessed += uniqueBatch.length;
         console.log(
-          `   \u2705 Batch ${batchNum} complete: ${deliverableIds.length} deliverable, ${failedIds.length} invalid`
+          `   \u2705 Batch ${batchNum} complete: ${deliverableIds.length} deliverable, ${failedIds.length} undeliverable`
         );
         console.log(
           `   \u{1F4CA} Progress: ${totalProcessed}/${pendingLeads.length} (${Math.round(totalProcessed / pendingLeads.length * 100)}%)
@@ -452,25 +556,42 @@ async function main() {
         });
       } catch (error) {
         apiErrors++;
-        console.error(`   \u274C Batch ${batchNum} failed: ${error.message}
+        const msg = (error == null ? void 0 : error.message) || String(error);
+        console.error(`   \u274C Batch ${batchNum} failed: ${msg}
 `);
+        const slackText = [
+          `\u{1F6A8} *Bouncer paused* \u2014 API/technical error (submit, poll, download, timeout, 402, batch failed, \u2026)`,
+          `Batch *${batchNum}/${totalBatches}:* \`${msg}\``,
+          `\u2022 Leads in this batch were *not* updated in the database.`,
+          `\u2022 Cron will *skip* Bouncer until the issue is fixed (see \`state/bouncer-paused\`) or a successful run removes that file.`
+        ].join("\n");
+        await postToAlertChannel(slackText);
+        writeBouncerApiPauseFile(msg);
         await updateServiceExecution(db, execId, {
           status: "failed",
           completed_at: /* @__PURE__ */ new Date(),
           api_errors: 1,
-          error_message: error.message
+          error_message: msg
         });
-        const failedIds = batch.filter((l) => l.id).map((l) => l.id);
-        if (failedIds.length > 0) {
-          await batchUpdateLeadStatus(db, failedIds, "failed", `Bouncer error: ${error.message}`);
-          totalInvalid += failedIds.length;
-        }
-        if (error.message.includes("402")) {
-          console.log("   \u26A0\uFE0F  Insufficient credits, stopping\n");
-          break;
-        }
+        abortReason = msg;
+        pipelineAborted = true;
+        break;
       }
       await sleep(RATE_LIMITS.BOUNCER_DELAY_BETWEEN_BATCHES_MS);
+    }
+    if (pipelineAborted) {
+      await updatePipelineRun(db, runId, {
+        status: "failed",
+        completed_at: /* @__PURE__ */ new Date(),
+        leads_processed: totalProcessed,
+        leads_succeeded: totalDeliverable,
+        leads_failed: totalInvalid,
+        error_message: abortReason
+      });
+      console.error(`
+\u274C Bouncer aborted: ${abortReason}
+`);
+      throw new Error("__BOUNCER_ABORT__");
     }
     await updatePipelineRun(db, runId, {
       status: "completed",
@@ -484,13 +605,19 @@ async function main() {
 \u2705 Bouncer Service Complete`);
     console.log(`   Total processed: ${totalProcessed} leads`);
     console.log(`   Deliverable: ${totalDeliverable} (${deliverableRate}%)`);
-    console.log(`   Invalid: ${totalInvalid}`);
+    console.log(`   Invalid (undeliverable): ${totalInvalid}`);
     console.log(`   API calls made: ${apiCallsMade}`);
     console.log(`   API errors: ${apiErrors}
 `);
+    await db.end();
   } catch (error) {
+    const msg = (error == null ? void 0 : error.message) || String(error);
+    if (msg === "__BOUNCER_ABORT__") {
+      await db.end();
+      process.exit(1);
+    }
     console.error(`
-\u274C Bouncer Service Failed: ${error.message}
+\u274C Bouncer Service Failed: ${msg}
 `);
     await updatePipelineRun(db, runId, {
       status: "failed",
@@ -498,11 +625,13 @@ async function main() {
       leads_processed: totalProcessed,
       leads_succeeded: totalDeliverable,
       leads_failed: totalInvalid,
-      error_message: error.message
+      error_message: msg
     });
-    process.exit(1);
-  } finally {
+    await postToAlertChannel(`\u{1F6A8} *Bouncer crashed*
+${msg}`).catch(() => {
+    });
     await db.end();
+    process.exit(1);
   }
 }
 main();

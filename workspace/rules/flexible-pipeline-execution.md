@@ -210,7 +210,8 @@ Users can describe their intent in **natural language** (English or any language
 | Variable | Type | Example | Description |
 |----------|------|---------|-------------|
 | `BOUNCER_API_KEY` | string | (from .env) | Bouncer API key |
-| `BOUNCER_BATCH_SIZE` | number | `1000` | Batch size (default 1000, max 1000 per Bouncer rate limit) |
+| `BOUNCER_BATCH_SIZE` | number | `100` | Emails per API batch (default 100; max 1000 per Bouncer) |
+| `BOUNCER_PER_RUN_MAX` | number | `100` | Max leads per `run-build-list.sh` run (shell; align with cron slots vs `BOUNCER_DAILY_CAP`) |
 
 ### Instantly Service ENV vars
 

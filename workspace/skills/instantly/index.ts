@@ -18,6 +18,8 @@
  * - INSTANTLY_LOAD_DAILY_CAP: Max leads to push per calendar day (US Eastern) (default: 600)
  * - FETCH_DATE: Single day YYYY-MM-DD (optional, defaults to today)
  * - FETCH_DATE_FROM + FETCH_DATE_TO: Date range (optional)
+ * - PROCESS_REPLIES_SLACK_REPORT: set to 1/true for fetch mode to post the Process Replies template to
+ *   SLACK_REPORT_CHANNEL (default: off — use evening cron only)
  */
 
 import {
@@ -50,6 +52,7 @@ import {
 import {
   buildProcessRepliesMessage,
   postToReportChannel,
+  postToAlertChannel,
 } from '../../lib/slack-templates.js';
 
 // ── Configuration ──────────────────────────────────────────────────
@@ -63,6 +66,10 @@ const LOAD_LIMIT = DEFAULTS.LOAD_LIMIT;
 const LOAD_DAILY_CAP = DEFAULTS.INSTANTLY_LOAD_DAILY_CAP;
 
 // ── Validation ─────────────────────────────────────────────────────
+
+function shouldPostProcessRepliesSlackReport(): boolean {
+  return /^(1|true|yes)$/i.test(String(process.env.PROCESS_REPLIES_SLACK_REPORT || '').trim());
+}
 
 function validateEnv(): void {
   validateRequiredEnv(['INSTANTLY_API_KEY', 'INSTANTLY_CAMPAIGN_ID', 'SUPABASE_DB_URL']);
@@ -83,6 +90,13 @@ function getFetchDateRange(): { min: string; max: string } {
 }
 
 // ── Instantly API ──────────────────────────────────────────────────
+
+/** On add-leads API failure, attach IDs already confirmed in earlier batches so runLoadService can persist them. */
+function attachPartialSuccessIds(error: unknown, ids: string[]): void {
+  if (error && typeof error === 'object' && ids.length > 0) {
+    (error as { partialSuccessIds?: string[] }).partialSuccessIds = [...ids];
+  }
+}
 
 interface AddLeadsResult {
   success: number;
@@ -161,13 +175,17 @@ async function instantlyAddLeads(leads: any[]): Promise<AddLeadsResult> {
           `   ✅ Batch ${batchNum}/${totalBatches}: ${uploaded} uploaded (${successIds.length} confirmed for DB), ${skipped} skipped, ${duped} duped, ${invalid} invalid`
         );
       } else {
-        totalFailed += batch.length;
         const msg = data.message || data.error || '';
+        const detail = `Instantly add-leads failed: HTTP ${response.status} ${msg}`.trim();
         console.error(`   ❌ Batch ${batchNum}/${totalBatches} failed: ${response.status} ${msg}`);
+        const err = new Error(detail);
+        attachPartialSuccessIds(err, successIds);
+        throw err;
       }
     } catch (error: any) {
-      totalFailed += batch.length;
       console.error(`   ❌ Batch ${batchNum}/${totalBatches} error: ${error.message}`);
+      attachPartialSuccessIds(error, successIds);
+      throw error;
     }
 
     if (offset + batchSize < leads.length) {
@@ -417,11 +435,31 @@ async function runLoadService(db: any, runId: string): Promise<LoadResult> {
     console.log(`\n✅ Load complete: ${success} loaded, ${failed} failed\n`);
     return { processed: verifiedLeads.length, succeeded: success, failed };
   } catch (error: any) {
-    console.error(`\n❌ Load failed: ${error.message}\n`);
+    const msg = error?.message || String(error);
+    const partialIds = (error as { partialSuccessIds?: string[] }).partialSuccessIds ?? [];
+    if (partialIds.length > 0) {
+      await batchUpdateLeadStatus(db, partialIds, 'instantly_loaded');
+      await db.query(
+        `UPDATE leads SET last_contacted_at = NOW(), updated_at = NOW() WHERE id = ANY($1::uuid[])`,
+        [partialIds]
+      );
+    }
+    console.error(`\n❌ Load failed: ${msg}\n`);
+    await postToAlertChannel(
+      [
+        `🚨 *Instantly load failed* (API error)`,
+        `\`${msg}\``,
+        partialIds.length > 0
+          ? `_Partial success: ${partialIds.length} lead(s) were updated in the DB before the failure._`
+          : `_Check INSTANTLY_API_KEY, INSTANTLY_CAMPAIGN_ID, and Instantly API status._`,
+      ].join('\n')
+    ).catch(() => {});
     await updateServiceExecution(db, execId, {
       status: 'failed',
       completed_at: new Date(),
-      error_message: error.message,
+      output_count: partialIds.length,
+      failed_count: verifiedLeads.length - partialIds.length,
+      error_message: msg,
     });
     throw error;
   }
@@ -734,8 +772,8 @@ async function main(): Promise<void> {
       leads_failed: totalFailed,
     });
 
-    // Post Process Replies report to Slack (template, not AI message)
-    if (fetchResult && process.env.SLACK_REPORT_CHANNEL) {
+    // Post Process Replies report to Slack only when PROCESS_REPLIES_SLACK_REPORT=1 (evening cron)
+    if (fetchResult && process.env.SLACK_REPORT_CHANNEL && shouldPostProcessRepliesSlackReport()) {
       const dateForReport =
         process.env.FETCH_DATE || process.env.REPORT_DATE || new Date().toISOString().split('T')[0];
       const durationSec = Math.round((Date.now() - fetchStartMs) / 1000);

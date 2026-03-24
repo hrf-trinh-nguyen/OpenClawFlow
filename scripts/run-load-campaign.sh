@@ -2,8 +2,9 @@
 set -euo pipefail
 
 # Load Campaign: push verified leads to Instantly.
-# Runs 4x/day (5:30, 6:30, 7:30, 8:30 AM US Eastern) to incrementally load leads.
-# Daily cap: INSTANTLY_LOAD_DAILY_CAP (default 600). Per-run: LOAD_LIMIT (default 200).
+# Cron: every 10 min from ~6 AM–11:55 PM US Eastern (+5 min vs Bouncer minutes — see crontab).
+# Each run pushes at most LOAD_LIMIT leads (default 200); exits early when daily cap or no verified leads.
+# Daily cap: INSTANTLY_LOAD_DAILY_CAP (default 600).
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib/common.sh
@@ -38,16 +39,14 @@ fi
 log_info "Starting Load (verified ready: ${VERIFIED_COUNT}, limit: ${LOAD_LIMIT}, remaining cap: ${REMAINING}/${CAP})"
 start_timer
 
-LOADED_BEFORE=$LOADED_TODAY
-
 if LOAD_LIMIT="$LOAD_LIMIT" MODE=load node workspace/skills/instantly/index.mjs; then
   DURATION=$(get_duration)
-  LOADED_AFTER=$(get_loaded_count_today)
-  LOADED_THIS_RUN=$((LOADED_AFTER - LOADED_BEFORE))
   PT_AT="$(get_pt_timestamp)"
-  MSG="✅ [${PT_AT}] Load done in ${DURATION}s. This run: +${LOADED_THIS_RUN} loaded. Today: ${LOADED_AFTER}/${CAP}."
+  MSG="✅ [${PT_AT}] Instantly load completed successfully (${DURATION}s)."
   log_success "$MSG"
   post_slack_report "$MSG"
 else
-  handle_error "load-campaign" "Instantly load"
+  # Skill posts to SLACK_ALERT_CHANNEL on load failure; avoid duplicate from handle_error
+  log_error "Instantly load failed (exit $?). See logs/load-campaign.log — check Slack alert channel if configured."
+  exit 1
 fi

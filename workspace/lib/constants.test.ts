@@ -72,7 +72,6 @@ describe('RATE_LIMITS', () => {
 describe('DEFAULTS', () => {
   it('has non-limit defaults', () => {
     expect(DEFAULTS.TARGET_COUNT).toBe(5);
-    expect(DEFAULTS.BOUNCER_BATCH_SIZE).toBe(1000);
     expect(DEFAULTS.FETCH_LIMIT).toBe(100);
   });
 
@@ -80,10 +79,17 @@ describe('DEFAULTS', () => {
     expect(FALLBACK_LIMITS.LOAD_LIMIT).toBe(200);
     expect(FALLBACK_LIMITS.INSTANTLY_LOAD_DAILY_CAP).toBe(600);
     expect(FALLBACK_LIMITS.BOUNCER_DAILY_CAP).toBe(600);
+    expect(FALLBACK_LIMITS.BOUNCER_BATCH_SIZE).toBe(100);
+    expect(FALLBACK_LIMITS.BOUNCER_PER_RUN_MAX).toBe(100);
   });
 
   it('limit fields match FALLBACK_LIMITS when LIMIT env vars are unset', async () => {
-    const keys = ['LOAD_LIMIT', 'INSTANTLY_LOAD_DAILY_CAP', 'BOUNCER_DAILY_CAP'] as const;
+    const keys = [
+      'LOAD_LIMIT',
+      'INSTANTLY_LOAD_DAILY_CAP',
+      'BOUNCER_DAILY_CAP',
+      'BOUNCER_BATCH_SIZE',
+    ] as const;
     const saved: Record<string, string | undefined> = {};
     for (const k of keys) {
       saved[k] = process.env[k];
@@ -94,6 +100,7 @@ describe('DEFAULTS', () => {
     expect(mod.DEFAULTS.LOAD_LIMIT).toBe(mod.FALLBACK_LIMITS.LOAD_LIMIT);
     expect(mod.DEFAULTS.INSTANTLY_LOAD_DAILY_CAP).toBe(mod.FALLBACK_LIMITS.INSTANTLY_LOAD_DAILY_CAP);
     expect(mod.DEFAULTS.BOUNCER_DAILY_CAP).toBe(mod.FALLBACK_LIMITS.BOUNCER_DAILY_CAP);
+    expect(mod.DEFAULTS.BOUNCER_BATCH_SIZE).toBe(mod.FALLBACK_LIMITS.BOUNCER_BATCH_SIZE);
     for (const k of keys) {
       if (saved[k] !== undefined) process.env[k] = saved[k];
       else delete process.env[k];

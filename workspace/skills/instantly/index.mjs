@@ -250,12 +250,20 @@ var RATE_LIMITS = {
 var LIMIT_ENV = {
   LOAD_LIMIT: "LOAD_LIMIT",
   INSTANTLY_LOAD_DAILY_CAP: "INSTANTLY_LOAD_DAILY_CAP",
-  BOUNCER_DAILY_CAP: "BOUNCER_DAILY_CAP"
+  BOUNCER_DAILY_CAP: "BOUNCER_DAILY_CAP",
+  /** Bouncer API chunk size (emails per submit). */
+  BOUNCER_BATCH_SIZE: "BOUNCER_BATCH_SIZE",
+  /** Max leads verified per cron run (shell `run-build-list.sh`; should align with batch size). */
+  BOUNCER_PER_RUN_MAX: "BOUNCER_PER_RUN_MAX"
 };
 var FALLBACK_LIMITS = {
   LOAD_LIMIT: 200,
   INSTANTLY_LOAD_DAILY_CAP: 600,
-  BOUNCER_DAILY_CAP: 600
+  BOUNCER_DAILY_CAP: 600,
+  /** Emails per Bouncer batch submit (API + cron pacing). */
+  BOUNCER_BATCH_SIZE: 100,
+  /** Max leads per `run-build-list.sh` invocation (cron retries every 10 min until daily cap). */
+  BOUNCER_PER_RUN_MAX: 100
 };
 var DEFAULTS = {
   TARGET_COUNT: 5,
@@ -271,7 +279,10 @@ var DEFAULTS = {
     process.env[LIMIT_ENV.BOUNCER_DAILY_CAP],
     FALLBACK_LIMITS.BOUNCER_DAILY_CAP
   ),
-  BOUNCER_BATCH_SIZE: 1e3,
+  BOUNCER_BATCH_SIZE: parseIntSafe(
+    process.env[LIMIT_ENV.BOUNCER_BATCH_SIZE],
+    FALLBACK_LIMITS.BOUNCER_BATCH_SIZE
+  ),
   FETCH_LIMIT: 100
 };
 var SLACK_CHANNELS = {
@@ -415,6 +426,10 @@ function postToReportChannel(text) {
   const channel = process.env.SLACK_REPORT_CHANNEL || "";
   return postSlackMessage(channel, text);
 }
+function postToAlertChannel(text) {
+  const channel = process.env.SLACK_ALERT_CHANNEL || "";
+  return postSlackMessage(channel, text);
+}
 
 // skills/instantly/index.ts
 var INSTANTLY_API_KEY = process.env.INSTANTLY_API_KEY;
@@ -423,6 +438,9 @@ var OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 var MODE = process.env.MODE || "all";
 var LOAD_LIMIT = DEFAULTS.LOAD_LIMIT;
 var LOAD_DAILY_CAP = DEFAULTS.INSTANTLY_LOAD_DAILY_CAP;
+function shouldPostProcessRepliesSlackReport() {
+  return /^(1|true|yes)$/i.test(String(process.env.PROCESS_REPLIES_SLACK_REPORT || "").trim());
+}
 function validateEnv() {
   validateRequiredEnv(["INSTANTLY_API_KEY", "INSTANTLY_CAMPAIGN_ID", "SUPABASE_DB_URL"]);
   if ((MODE === "fetch" || MODE === "all") && !OPENAI_API_KEY) {
@@ -436,6 +454,11 @@ function getFetchDateRange() {
     process.env.FETCH_DATE_TO,
     process.env.FETCH_DATE || process.env.REPORT_DATE
   );
+}
+function attachPartialSuccessIds(error, ids) {
+  if (error && typeof error === "object" && ids.length > 0) {
+    error.partialSuccessIds = [...ids];
+  }
 }
 async function instantlyAddLeads(leads) {
   var _a;
@@ -499,13 +522,17 @@ async function instantlyAddLeads(leads) {
           `   \u2705 Batch ${batchNum}/${totalBatches}: ${uploaded} uploaded (${successIds.length} confirmed for DB), ${skipped} skipped, ${duped} duped, ${invalid} invalid`
         );
       } else {
-        totalFailed += batch.length;
         const msg = data.message || data.error || "";
+        const detail = `Instantly add-leads failed: HTTP ${response.status} ${msg}`.trim();
         console.error(`   \u274C Batch ${batchNum}/${totalBatches} failed: ${response.status} ${msg}`);
+        const err = new Error(detail);
+        attachPartialSuccessIds(err, successIds);
+        throw err;
       }
     } catch (error) {
-      totalFailed += batch.length;
       console.error(`   \u274C Batch ${batchNum}/${totalBatches} error: ${error.message}`);
+      attachPartialSuccessIds(error, successIds);
+      throw error;
     }
     if (offset + batchSize < leads.length) {
       await sleep(RATE_LIMITS.INSTANTLY_DELAY_MS);
@@ -691,13 +718,32 @@ async function runLoadService(db, runId) {
 `);
     return { processed: verifiedLeads.length, succeeded: success, failed };
   } catch (error) {
+    const msg = (error == null ? void 0 : error.message) || String(error);
+    const partialIds = error.partialSuccessIds ?? [];
+    if (partialIds.length > 0) {
+      await batchUpdateLeadStatus(db, partialIds, "instantly_loaded");
+      await db.query(
+        `UPDATE leads SET last_contacted_at = NOW(), updated_at = NOW() WHERE id = ANY($1::uuid[])`,
+        [partialIds]
+      );
+    }
     console.error(`
-\u274C Load failed: ${error.message}
+\u274C Load failed: ${msg}
 `);
+    await postToAlertChannel(
+      [
+        `\u{1F6A8} *Instantly load failed* (API error)`,
+        `\`${msg}\``,
+        partialIds.length > 0 ? `_Partial success: ${partialIds.length} lead(s) were updated in the DB before the failure._` : `_Check INSTANTLY_API_KEY, INSTANTLY_CAMPAIGN_ID, and Instantly API status._`
+      ].join("\n")
+    ).catch(() => {
+    });
     await updateServiceExecution(db, execId, {
       status: "failed",
       completed_at: /* @__PURE__ */ new Date(),
-      error_message: error.message
+      output_count: partialIds.length,
+      failed_count: verifiedLeads.length - partialIds.length,
+      error_message: msg
     });
     throw error;
   }
@@ -952,7 +998,7 @@ async function main() {
       leads_succeeded: totalSucceeded,
       leads_failed: totalFailed
     });
-    if (fetchResult && process.env.SLACK_REPORT_CHANNEL) {
+    if (fetchResult && process.env.SLACK_REPORT_CHANNEL && shouldPostProcessRepliesSlackReport()) {
       const dateForReport = process.env.FETCH_DATE || process.env.REPORT_DATE || (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
       const durationSec = Math.round((Date.now() - fetchStartMs) / 1e3);
       const runAtET = (/* @__PURE__ */ new Date()).toLocaleString("en-US", {

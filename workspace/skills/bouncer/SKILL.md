@@ -21,7 +21,9 @@ Autonomous email verification service using Bouncer batch API.
 ## Parameters (ENV variables)
 
 - `BOUNCER_API_KEY`: Bouncer API key (required)
-- `BOUNCER_BATCH_SIZE`: batch size (default: 1000, max: 1000 per Bouncer rate limit)
+- `BOUNCER_BATCH_SIZE`: emails per API batch (default: 100, max: 1000 per Bouncer)
+- `BOUNCER_PER_RUN_MAX`: max leads per cron run (shell `run-build-list.sh`; default 100, from `FALLBACK_LIMITS`)
+- `SLACK_BOT_TOKEN` + `SLACK_ALERT_CHANNEL`: alerts when the run aborts (unexpected Bouncer status or API error)
 
 ## Execute
 
@@ -38,9 +40,9 @@ Updates database:
 
 ## Error Handling
 
-- **Insufficient credits (402)**: Stops processing, marks remaining leads as failed
-- **Batch timeout**: Marks batch as failed after 5 minutes, continues to next batch
-- **API error**: Logs to `service_executions`, marks batch as failed, continues
+- **Normal “bad email”**: Bouncer status `undeliverable` → lead `failed` with reason `Email not deliverable` (processing continues).
+- **Unexpected result** (`risky`, `unknown`, missing row, or any status other than `deliverable` / `undeliverable`): **Stops immediately** — no DB updates for that batch, **`SLACK_ALERT_CHANNEL`** notified (requires `SLACK_BOT_TOKEN` + `SLACK_ALERT_CHANNEL`), exit code 1.
+- **API / technical errors** (submit, poll, download, timeout, 402, etc.): **Stops immediately** — leads in that batch are **not** mass-marked failed; **Slack alert**; writes `state/bouncer-paused` so **cron skips Bouncer** until you fix the API or a **successful** run removes the file; exit 1.
 
 ## Database Tables Updated
 

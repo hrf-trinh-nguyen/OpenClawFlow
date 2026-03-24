@@ -3,13 +3,13 @@
   "jobs": [
     {
       "id": "d66c8bed-6c9c-4100-93d6-590409600cea",
-      "name": "5–8 AM ET - Bouncer (Build List)",
+      "name": "4 AM–11:50 PM ET (10m) - Bouncer (Build List)",
       "enabled": false,
       "createdAtMs": 1772788600592,
       "updatedAtMs": 1773656167796,
       "schedule": {
         "kind": "cron",
-        "expr": "0 5,6,7,8 * * *",
+        "expr": "0,10,20,30,40,50 4-23,0-3 * * *",
         "tz": "America/New_York"
       },
       "sessionTarget": "isolated",
@@ -37,13 +37,13 @@
     },
     {
       "id": "0d6eb890-7f8e-47a2-95d7-b50d268ff950",
-      "name": "5:30–8:30 AM ET - Load Campaign",
+      "name": "6:05 AM–11:55 PM ET (10m) - Load Campaign",
       "enabled": false,
       "createdAtMs": 1772788601690,
       "updatedAtMs": 1773656167815,
       "schedule": {
         "kind": "cron",
-        "expr": "30 5,6,7,8 * * *",
+        "expr": "5,15,25,35,45,55 6-23,0-3 * * *",
         "tz": "America/New_York"
       },
       "sessionTarget": "isolated",

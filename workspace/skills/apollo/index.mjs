@@ -252,12 +252,20 @@ var RATE_LIMITS = {
 var LIMIT_ENV = {
   LOAD_LIMIT: "LOAD_LIMIT",
   INSTANTLY_LOAD_DAILY_CAP: "INSTANTLY_LOAD_DAILY_CAP",
-  BOUNCER_DAILY_CAP: "BOUNCER_DAILY_CAP"
+  BOUNCER_DAILY_CAP: "BOUNCER_DAILY_CAP",
+  /** Bouncer API chunk size (emails per submit). */
+  BOUNCER_BATCH_SIZE: "BOUNCER_BATCH_SIZE",
+  /** Max leads verified per cron run (shell `run-build-list.sh`; should align with batch size). */
+  BOUNCER_PER_RUN_MAX: "BOUNCER_PER_RUN_MAX"
 };
 var FALLBACK_LIMITS = {
   LOAD_LIMIT: 200,
   INSTANTLY_LOAD_DAILY_CAP: 600,
-  BOUNCER_DAILY_CAP: 600
+  BOUNCER_DAILY_CAP: 600,
+  /** Emails per Bouncer batch submit (API + cron pacing). */
+  BOUNCER_BATCH_SIZE: 100,
+  /** Max leads per `run-build-list.sh` invocation (cron retries every 10 min until daily cap). */
+  BOUNCER_PER_RUN_MAX: 100
 };
 var DEFAULTS = {
   TARGET_COUNT: 5,
@@ -273,7 +281,10 @@ var DEFAULTS = {
     process.env[LIMIT_ENV.BOUNCER_DAILY_CAP],
     FALLBACK_LIMITS.BOUNCER_DAILY_CAP
   ),
-  BOUNCER_BATCH_SIZE: 1e3,
+  BOUNCER_BATCH_SIZE: parseIntSafe(
+    process.env[LIMIT_ENV.BOUNCER_BATCH_SIZE],
+    FALLBACK_LIMITS.BOUNCER_BATCH_SIZE
+  ),
   FETCH_LIMIT: 100
 };
 var SLACK_CHANNELS = {

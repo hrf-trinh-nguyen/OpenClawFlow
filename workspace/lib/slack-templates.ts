@@ -163,3 +163,9 @@ export function postToReportChannel(text: string): Promise<boolean> {
   const channel = process.env.SLACK_REPORT_CHANNEL || '';
   return postSlackMessage(channel, text);
 }
+
+/** Errors / pipeline aborts — uses `SLACK_ALERT_CHANNEL` (same as shell `post_slack_alert`). */
+export function postToAlertChannel(text: string): Promise<boolean> {
+  const channel = process.env.SLACK_ALERT_CHANNEL || '';
+  return postSlackMessage(channel, text);
+}

@@ -1,15 +1,15 @@
 # OpenClaw Outbound Automation
 
-Outbound lead pipeline powered by **OpenClaw**: lead verification (Bouncer), campaign loading (Instantly), reply processing, and daily reporting. Scheduling uses **system crontab**. Leads are imported via the Agent + **csv-import** skill; no Apollo in the cron flow.
+Outbound lead pipeline powered by **OpenClaw** (gateway + skills) with **Linux user crontab** driving the daily pipeline. **`openclaw.json` has OpenClaw cron disabled** — the real schedule is **`cron/crontab.example`** installed via `./scripts/install-cron.sh`. See **[cron/README.md](cron/README.md)** for the full flow. Leads are imported via the Agent + **csv-import** skill; no Apollo in the cron flow.
 
 ## Overview
 
 | Step | Description |
 |------|-------------|
 | **Lead source** | Agent + **csv-import** (CSV or Google Sheet) → leads in DB with `processing_status=apollo_matched` |
-| **Bouncer** | Cron verifies emails (Bouncer API), updates to `bouncer_verified` or `failed`. Daily cap: `BOUNCER_DAILY_CAP` (default 600). |
-| **Load campaign** | Cron pushes verified leads to Instantly. Daily cap: `INSTANTLY_LOAD_DAILY_CAP` (default 600); per run: `LOAD_LIMIT` (default 200). |
-| **Process replies** | Cron fetches inbox, classifies replies (hot/soft/objection/negative), auto-replies to hot leads. |
+| **Bouncer** | Cron every **10 min** (~4 AM–11:50 PM ET), **≤`BOUNCER_PER_RUN_MAX`** per run (default 100); daily cap `BOUNCER_DAILY_CAP` (600). Skips when cap/pending=0. |
+| **Load campaign** | Cron every **10 min** from **~6 AM** ET (+5 min vs Bouncer), **≤`LOAD_LIMIT`** per push (default 200); daily cap `INSTANTLY_LOAD_DAILY_CAP` (600). Skips when cap/no leads. |
+| **Process replies** | Hourly cron fetches/classifies (no Slack). **9:30 PM ET** — one Process Replies Slack template; **10 PM** — daily report (separate). |
 | **Daily report** | Cron aggregates metrics and posts to Slack. |
 
 ## Schedule (Crontab)
@@ -18,9 +18,10 @@ Outbound lead pipeline powered by **OpenClaw**: lead verification (Bouncer), cam
 
 | Job | Eastern | UTC (EDT) | Script | Log |
 |-----|---------|-----------|--------|-----|
-| Bouncer | 5, 6, 7, 8 AM | 9–12 | `run-build-list.sh` | `logs/build-list.log` |
-| Load campaign | 5:30–8:30 AM | 9:30–12:30 | `run-load-campaign.sh` | `logs/load-campaign.log` |
-| Process replies | 10 AM – 9 PM (hourly) | 14–23, 0, 1 | `run-process-replies.sh` | `logs/process-replies.log` |
+| Bouncer | ~4:00 AM – 11:50 PM (every 10m) | UTC 8–23 + 0–3 (EDT) | `run-build-list.sh` | `logs/build-list.log` |
+| Load campaign | ~6:05 AM – 11:55 PM (+5m vs Bouncer) | UTC 10–23 + 0–3 (EDT) | `run-load-campaign.sh` | `logs/load-campaign.log` |
+| Process replies | 10 AM – 9 PM (hourly, no Slack) | 14–23, 0, 1 | `run-process-replies.sh` | `logs/process-replies.log` |
+| Process replies | 9:30 PM (Slack summary) | 01:30 (EDT) | `run-process-replies-evening-slack.sh` | `logs/process-replies-evening.log` |
 | Daily report | 10 PM | 02:00 | `run-daily-report.sh` | `logs/daily-report.log` |
 
 See [cron/README.md](cron/README.md) for install and usage.
@@ -38,6 +39,7 @@ openclaw-mvp/
 │   ├── run-build-list.sh   # Bouncer only (verify leads from DB)
 │   ├── run-load-campaign.sh
 │   ├── run-process-replies.sh
+│   ├── run-process-replies-evening-slack.sh
 │   ├── run-daily-report.sh
 │   ├── after-pull-vps.sh    # After git pull: install, build, restart
 │   ├── install-cron.sh     # Install crontab from crontab.example

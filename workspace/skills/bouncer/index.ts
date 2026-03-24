@@ -9,8 +9,8 @@
  * 
  * ENV variables:
  * - BOUNCER_API_KEY: Bouncer API key
- * - BOUNCER_BATCH_SIZE: batch size (default: 1000, max: 1000 per Bouncer rate limit)
- * - BOUNCER_LIMIT: max leads to verify this run (e.g. set by cron from BOUNCER_DAILY_CAP remaining)
+ * - BOUNCER_BATCH_SIZE: emails per API batch (default: 100, max: 1000 per Bouncer)
+ * - BOUNCER_LIMIT: max leads to verify this run (cron sets min(remaining daily cap, BOUNCER_PER_RUN_MAX))
  * - SUPABASE_DB_URL: PostgreSQL connection string
  */
 
@@ -25,6 +25,44 @@ import {
 } from '../../lib/supabase-pipeline.js';
 import { sleep, validateRequiredEnv, clamp, parseIntSafe, dedupeByEmail } from '../../lib/utils.js';
 import { RATE_LIMITS, DEFAULTS, API_ENDPOINTS } from '../../lib/constants.js';
+import { postToAlertChannel } from '../../lib/slack-templates.js';
+import { mkdirSync, writeFileSync } from 'fs';
+import { join } from 'path';
+
+/** Bouncer API email result — only these are “expected” without human review (see docs.usebouncer.com). */
+const BOUNCER_STATUS_DELIVERABLE = 'deliverable';
+/** Treated as normal “bad email” → same as our DB reason `Email not deliverable`. */
+const BOUNCER_STATUS_UNDELIVERABLE = 'undeliverable';
+
+const PAUSE_FILENAME = 'bouncer-paused';
+
+function repoRootForState(): string {
+  return process.env.OPENCLAW_HOME || process.cwd();
+}
+
+/**
+ * On API errors only (submit/poll/download/timeout/402/…): pauses subsequent Bouncer cron runs
+ * until `run-build-list.sh` succeeds (removes file) or you delete `state/bouncer-paused` manually.
+ * Not used for unexpected per-email statuses from results (partition path) — API failures only.
+ */
+function writeBouncerApiPauseFile(reason: string): void {
+  try {
+    const dir = join(repoRootForState(), 'state');
+    mkdirSync(dir, { recursive: true });
+    const body = [
+      `paused_at=${new Date().toISOString()}`,
+      `reason=${reason.replace(/\n/g, ' ')}`,
+      '',
+      'Auto-cleared after a successful Bouncer run, or delete this file manually.',
+    ].join('\n');
+    writeFileSync(join(dir, PAUSE_FILENAME), body, 'utf8');
+    console.error(
+      `   ⏸️  Bouncer paused: wrote ${join(dir, PAUSE_FILENAME)} — cron will skip Bouncer until resolved.`
+    );
+  } catch (e) {
+    console.error('   ⚠️  Could not write pause file:', e);
+  }
+}
 
 // ── Configuration ──────────────────────────────────────────────────
 
@@ -126,6 +164,54 @@ async function bouncerPollBatch(
   throw new Error(`Bouncer batch timed out after ${maxWaitMs / 1000}s`);
 }
 
+type PartitionResult =
+  | { ok: true; deliverableIds: string[]; failedIds: string[] }
+  | { ok: false; reason: string };
+
+/**
+ * Only `deliverable` and `undeliverable` are treated as normal outcomes.
+ * `risky` / `unknown` / anything else → abort (avoid burning credits on ambiguous results).
+ */
+function partitionBouncerResults(
+  results: any[],
+  uniqueBatch: { id?: string; email?: string | null }[],
+  emailsSent: string[]
+): PartitionResult {
+  const seen = new Set<string>();
+  const deliverableIds: string[] = [];
+  const failedIds: string[] = [];
+
+  for (const result of results) {
+    const email = typeof result?.email === 'string' ? result.email.trim() : '';
+    if (!email) continue;
+    seen.add(email);
+    const norm = String(result?.status ?? '')
+      .toLowerCase()
+      .trim();
+    const lead = uniqueBatch.find((l) => l.email === email);
+    if (!lead?.id) continue;
+
+    if (norm === BOUNCER_STATUS_DELIVERABLE) {
+      deliverableIds.push(lead.id);
+    } else if (norm === BOUNCER_STATUS_UNDELIVERABLE) {
+      failedIds.push(lead.id);
+    } else {
+      return {
+        ok: false,
+        reason: `Unexpected Bouncer status "${norm || '(empty)'}" for \`${email}\`. Only deliverable + undeliverable are auto-handled; risky/unknown stops the run.`,
+      };
+    }
+  }
+
+  for (const e of emailsSent) {
+    if (!seen.has(e)) {
+      return { ok: false, reason: `Bouncer response missing result row for \`${e}\`` };
+    }
+  }
+
+  return { ok: true, deliverableIds, failedIds };
+}
+
 // ── Main Service ───────────────────────────────────────────────────
 
 async function main() {
@@ -163,14 +249,18 @@ async function main() {
   let totalInvalid = 0;
   let apiCallsMade = 0;
   let apiErrors = 0;
+  let pipelineAborted = false;
+  let abortReason = '';
 
   try {
     // Process in batches
     for (let i = 0; i < pendingLeads.length; i += BOUNCER_BATCH_SIZE) {
+      if (pipelineAborted) break;
+
       const batch = pendingLeads.slice(i, i + BOUNCER_BATCH_SIZE);
       const batchNum = Math.floor(i / BOUNCER_BATCH_SIZE) + 1;
       const totalBatches = Math.ceil(pendingLeads.length / BOUNCER_BATCH_SIZE);
-      
+
       console.log(`🔍 Processing batch ${batchNum}/${totalBatches} (${batch.length} leads)...`);
 
       const execId = await createServiceExecution(db, {
@@ -178,7 +268,7 @@ async function main() {
         service_name: 'bouncer',
         status: 'running',
         input_count: batch.length,
-        batch_size: BOUNCER_BATCH_SIZE
+        batch_size: BOUNCER_BATCH_SIZE,
       });
 
       try {
@@ -205,52 +295,53 @@ async function main() {
         apiCallsMade++;
         console.log(`   ✅ Submitted batch: ${batchId}`);
 
-        // Poll for results
         const results = await bouncerPollBatch(batchId);
         apiCallsMade++;
 
-        // Process results
-        const deliverableIds: string[] = [];
-        const failedIds: string[] = [];
-
-        for (const result of results) {
-          const lead = uniqueBatch.find(l => l.email === result.email);
-          if (!lead || !lead.id) continue;
-
-          if (result.status === 'deliverable') {
-            deliverableIds.push(lead.id);
-            totalDeliverable++;
-          } else {
-            failedIds.push(lead.id);
-            totalInvalid++;
-          }
+        const part = partitionBouncerResults(results, uniqueBatch, emails);
+        if (!part.ok) {
+          const detail = `Batch ${batchNum}/${totalBatches} — ${part.reason}`;
+          console.error(`   ❌ ${detail}\n`);
+          const slackText = [
+            `🚨 *Bouncer STOPPED* (unexpected result — not a normal undeliverable email)`,
+            detail,
+            `Batch id: \`${batchId}\``,
+            `_No further batches this run. Leads in this batch were not updated._`,
+          ].join('\n');
+          await postToAlertChannel(slackText);
+          await updateServiceExecution(db, execId, {
+            status: 'failed',
+            completed_at: new Date(),
+            api_errors: 1,
+            error_message: part.reason,
+          });
+          abortReason = part.reason;
+          pipelineAborted = true;
+          break;
         }
 
-        // Update lead statuses
+        const { deliverableIds, failedIds } = part;
+
         if (deliverableIds.length > 0) {
           await batchUpdateLeadStatus(db, deliverableIds, 'bouncer_verified');
-          
-          // Also update email_status column for backwards compatibility
-          await db.query(
-            `UPDATE leads SET email_status = 'deliverable' WHERE id = ANY($1::uuid[])`,
-            [deliverableIds]
-          );
+          await db.query(`UPDATE leads SET email_status = 'deliverable' WHERE id = ANY($1::uuid[])`, [
+            deliverableIds,
+          ]);
         }
 
         if (failedIds.length > 0) {
           await batchUpdateLeadStatus(db, failedIds, 'failed', 'Email not deliverable');
-          
-          // Update email_status
-          await db.query(
-            `UPDATE leads SET email_status = 'undeliverable' WHERE id = ANY($1::uuid[])`,
-            [failedIds]
-          );
+          await db.query(`UPDATE leads SET email_status = 'undeliverable' WHERE id = ANY($1::uuid[])`, [
+            failedIds,
+          ]);
         }
 
+        totalDeliverable += deliverableIds.length;
+        totalInvalid += failedIds.length;
         totalProcessed += uniqueBatch.length;
 
         console.log(
-          `   ✅ Batch ${batchNum} complete: ${deliverableIds.length} deliverable, ${failedIds.length} invalid`
+          `   ✅ Batch ${batchNum} complete: ${deliverableIds.length} deliverable, ${failedIds.length} undeliverable`
         );
         console.log(
           `   📊 Progress: ${totalProcessed}/${pendingLeads.length} (${Math.round((totalProcessed / pendingLeads.length) * 100)}%)\n`
@@ -265,37 +356,52 @@ async function main() {
         });
       } catch (error: any) {
         apiErrors++;
-        console.error(`   ❌ Batch ${batchNum} failed: ${error.message}\n`);
+        const msg = error?.message || String(error);
+        console.error(`   ❌ Batch ${batchNum} failed: ${msg}\n`);
+
+        const slackText = [
+          `🚨 *Bouncer paused* — API/technical error (submit, poll, download, timeout, 402, batch failed, …)`,
+          `Batch *${batchNum}/${totalBatches}:* \`${msg}\``,
+          `• Leads in this batch were *not* updated in the database.`,
+          `• Cron will *skip* Bouncer until the issue is fixed (see \`state/bouncer-paused\`) or a successful run removes that file.`,
+        ].join('\n');
+        await postToAlertChannel(slackText);
+        writeBouncerApiPauseFile(msg);
 
         await updateServiceExecution(db, execId, {
           status: 'failed',
           completed_at: new Date(),
           api_errors: 1,
-          error_message: error.message,
+          error_message: msg,
         });
 
-        const failedIds = batch.filter((l) => l.id).map((l) => l.id!);
-        if (failedIds.length > 0) {
-          await batchUpdateLeadStatus(db, failedIds, 'failed', `Bouncer error: ${error.message}`);
-          totalInvalid += failedIds.length;
-        }
-
-        if (error.message.includes('402')) {
-          console.log('   ⚠️  Insufficient credits, stopping\n');
-          break;
-        }
+        abortReason = msg;
+        pipelineAborted = true;
+        break;
       }
 
       await sleep(RATE_LIMITS.BOUNCER_DELAY_BETWEEN_BATCHES_MS);
     }
 
-    // Update pipeline run
+    if (pipelineAborted) {
+      await updatePipelineRun(db, runId, {
+        status: 'failed',
+        completed_at: new Date(),
+        leads_processed: totalProcessed,
+        leads_succeeded: totalDeliverable,
+        leads_failed: totalInvalid,
+        error_message: abortReason,
+      });
+      console.error(`\n❌ Bouncer aborted: ${abortReason}\n`);
+      throw new Error('__BOUNCER_ABORT__');
+    }
+
     await updatePipelineRun(db, runId, {
       status: 'completed',
       completed_at: new Date(),
       leads_processed: totalProcessed,
       leads_succeeded: totalDeliverable,
-      leads_failed: totalInvalid
+      leads_failed: totalInvalid,
     });
 
     const deliverableRate =
@@ -304,11 +410,19 @@ async function main() {
     console.log(`\n✅ Bouncer Service Complete`);
     console.log(`   Total processed: ${totalProcessed} leads`);
     console.log(`   Deliverable: ${totalDeliverable} (${deliverableRate}%)`);
-    console.log(`   Invalid: ${totalInvalid}`);
+    console.log(`   Invalid (undeliverable): ${totalInvalid}`);
     console.log(`   API calls made: ${apiCallsMade}`);
     console.log(`   API errors: ${apiErrors}\n`);
+
+    await db.end();
   } catch (error: any) {
-    console.error(`\n❌ Bouncer Service Failed: ${error.message}\n`);
+    const msg = error?.message || String(error);
+    if (msg === '__BOUNCER_ABORT__') {
+      await db.end();
+      process.exit(1);
+    }
+
+    console.error(`\n❌ Bouncer Service Failed: ${msg}\n`);
 
     await updatePipelineRun(db, runId, {
       status: 'failed',
@@ -316,12 +430,13 @@ async function main() {
       leads_processed: totalProcessed,
       leads_succeeded: totalDeliverable,
       leads_failed: totalInvalid,
-      error_message: error.message,
+      error_message: msg,
     });
 
-    process.exit(1);
-  } finally {
+    await postToAlertChannel(`🚨 *Bouncer crashed*\n${msg}`).catch(() => {});
+
     await db.end();
+    process.exit(1);
   }
 }
 

@@ -21,11 +21,11 @@ load_env() {
   fi
 }
 
-# Fill LOAD_LIMIT / INSTANTLY_LOAD_DAILY_CAP / BOUNCER_DAILY_CAP when missing.
+# Fill LOAD_LIMIT / INSTANTLY_LOAD_DAILY_CAP / BOUNCER_DAILY_CAP / BOUNCER_PER_RUN_MAX / BOUNCER_BATCH_SIZE when missing.
 # Numeric fallbacks come from workspace/lib/constants.mjs → FALLBACK_LIMITS (run: npm run build in workspace).
 # Prefer setting all three in .env — then this only acts as safety net.
 apply_limit_env_defaults() {
-  local fb_load=200 fb_inst=600 fb_bouncer=600
+  local fb_load=200 fb_inst=600 fb_bouncer=600 fb_per_run=100 fb_batch=100
   if [ -n "${REPO_ROOT:-}" ] && [ -f "$REPO_ROOT/workspace/lib/constants.mjs" ]; then
     local line
     line="$(
@@ -34,17 +34,23 @@ apply_limit_env_defaults() {
         process.stdout.write(
           FALLBACK_LIMITS.LOAD_LIMIT + ' ' +
           FALLBACK_LIMITS.INSTANTLY_LOAD_DAILY_CAP + ' ' +
-          FALLBACK_LIMITS.BOUNCER_DAILY_CAP
+          FALLBACK_LIMITS.BOUNCER_DAILY_CAP + ' ' +
+          FALLBACK_LIMITS.BOUNCER_PER_RUN_MAX + ' ' +
+          FALLBACK_LIMITS.BOUNCER_BATCH_SIZE
         );
       " 2>/dev/null
     )" || line=""
     if [ -n "$line" ]; then
-      read -r fb_load fb_inst fb_bouncer <<< "$line"
+      read -r fb_load fb_inst fb_bouncer fb_per_run fb_batch <<< "$line"
     fi
   fi
   : "${LOAD_LIMIT:=${fb_load}}"
   : "${INSTANTLY_LOAD_DAILY_CAP:=${fb_inst}}"
   : "${BOUNCER_DAILY_CAP:=${fb_bouncer}}"
+  : "${BOUNCER_PER_RUN_MAX:=${fb_per_run}}"
+  : "${BOUNCER_BATCH_SIZE:=${fb_batch}}"
+  # Node skills read these; `:` does not export — ensure child processes see fallbacks.
+  export BOUNCER_BATCH_SIZE BOUNCER_PER_RUN_MAX
 }
 
 # ── Slack Notifications ──────────────────────────────────────────────

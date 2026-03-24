@@ -1,35 +1,48 @@
-# OpenClaw pipeline — Schedule in UTC (VPS server timezone)
-# Install: ./scripts/install-cron.sh  (from repo root, as deploy user)
+# ═══════════════════════════════════════════════════════════════════════════════
+# AUTHORITATIVE SCHEDULE: Linux system crontab (user crontab), NOT OpenClaw cron
+# ═══════════════════════════════════════════════════════════════════════════════
+# • Install: ./scripts/install-cron.sh   →  copies this file into `crontab -l`
+# • openclaw.json has "cron.enabled": false — the gateway does NOT run these jobs.
+# • cron/jobs.json + scripts/register-cron-jobs.sh are OPTIONAL reference only if you
+#   ever enable OpenClaw cron. For normal operation, ignore them; edit THIS file only.
+# • Pipeline flow: see cron/README.md → section “Current pipeline flow”
 #
+# Schedule in UTC (VPS server timezone)
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ IMPORTANT: User crontab TZ= is ignored on most Linux. Entries are UTC.
 # │
 # │ Business timezone: America/New_York (US Eastern, EST/EDT).
 # │
 # │ Below uses EDT (daylight, ~Mar–Nov, UTC-4). In EST (winter, UTC-5) shift
-# │ each job +1h in UTC (e.g. Bouncer → 10,11,12,13; Daily report → 03:00).
+# │ each job +1h in UTC (e.g. Bouncer batch window → hour 9 instead of 8; Daily report → 03:00).
 # │
 # │ EDT examples:
 # │   5 AM ET  = 09:00 UTC     10 AM ET = 14:00 UTC     10 PM ET = 02:00 UTC (next)
 # │   5:30 ET  = 09:30 UTC     9 PM ET  = 01:00 UTC (next calendar UTC day)
 # │
-# │ Schedule (Eastern local time — same windows as before, now in ET):
-# │   Bouncer:         5, 6, 7, 8 AM ET
-# │   Load:            5:30, 6:30, 7:30, 8:30 AM ET
-# │   Process replies: 10 AM – 9 PM ET (hourly)
+# │ Schedule (Eastern local time, EDT — see EST note above):
+# │   Bouncer:         4:00 AM – 11:50 PM ET, every 10 min (:00,:10,…); max BOUNCER_PER_RUN_MAX/run
+# │   Load:            6:05 AM – 11:55 PM ET, every 10 min (+5 min vs Bouncer); max LOAD_LIMIT/run
+# │   Process replies: 10 AM – 9 PM ET (hourly, no Slack)
+# │   Process replies: 9:30 PM ET — one Slack summary (PROCESS_REPLIES_SLACK_REPORT=1)
 # │   Daily report:    10 PM ET
 # └─────────────────────────────────────────────────────────────────────────────
 
 OPENCLAW_REPO=/home/deploy/openclaw-mvp
 
-# ── Bouncer: 5, 6, 7, 8 AM ET (EDT → 9,10,11,12 UTC) ───────────────────────────
-0 9,10,11,12 * * * OPENCLAW_HOME=$OPENCLAW_REPO $OPENCLAW_REPO/scripts/run-build-list.sh >> $OPENCLAW_REPO/logs/build-list.log 2>&1
+# ── Bouncer: 4:00 AM – 11:50 PM ET (EDT → UTC 8–23 and 0–3), every 10 min ─────
+0,10,20,30,40,50 8-23 * * * OPENCLAW_HOME=$OPENCLAW_REPO $OPENCLAW_REPO/scripts/run-build-list.sh >> $OPENCLAW_REPO/logs/build-list.log 2>&1
+0,10,20,30,40,50 0-3 * * * OPENCLAW_HOME=$OPENCLAW_REPO $OPENCLAW_REPO/scripts/run-build-list.sh >> $OPENCLAW_REPO/logs/build-list.log 2>&1
 
-# ── Load: 5:30–8:30 AM ET (EDT → 9,10,11,12 :30 UTC) ───────────────────────────
-30 9,10,11,12 * * * OPENCLAW_HOME=$OPENCLAW_REPO $OPENCLAW_REPO/scripts/run-load-campaign.sh >> $OPENCLAW_REPO/logs/load-campaign.log 2>&1
+# ── Load: 6:05 AM – 11:55 PM ET (EDT → UTC 10–23 and 0–3), +5 min vs Bouncer ───
+5,15,25,35,45,55 10-23 * * * OPENCLAW_HOME=$OPENCLAW_REPO $OPENCLAW_REPO/scripts/run-load-campaign.sh >> $OPENCLAW_REPO/logs/load-campaign.log 2>&1
+5,15,25,35,45,55 0-3 * * * OPENCLAW_HOME=$OPENCLAW_REPO $OPENCLAW_REPO/scripts/run-load-campaign.sh >> $OPENCLAW_REPO/logs/load-campaign.log 2>&1
 
-# ── Process replies: 10 AM – 9 PM ET (EDT → 14..23, 0, 1 UTC) ────────────────
+# ── Process replies: 10 AM – 9 PM ET (EDT → 14..23, 0, 1 UTC), hourly, no Slack ─
 0 14,15,16,17,18,19,20,21,22,23,0,1 * * * OPENCLAW_HOME=$OPENCLAW_REPO $OPENCLAW_REPO/scripts/run-process-replies.sh >> $OPENCLAW_REPO/logs/process-replies.log 2>&1
+
+# ── Process replies: 9:30 PM ET only — Slack template (EDT → 01:30 UTC next day) ─
+30 1 * * * OPENCLAW_HOME=$OPENCLAW_REPO $OPENCLAW_REPO/scripts/run-process-replies-evening-slack.sh >> $OPENCLAW_REPO/logs/process-replies-evening.log 2>&1
 
 # ── Daily report: 10 PM ET (EDT → 02:00 UTC) ───────────────────────────────────
 0 2 * * * OPENCLAW_HOME=$OPENCLAW_REPO $OPENCLAW_REPO/scripts/run-daily-report.sh >> $OPENCLAW_REPO/logs/daily-report.log 2>&1
