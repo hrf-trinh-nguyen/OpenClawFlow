@@ -35,17 +35,29 @@ function parseIntSafe(value, fallback) {
 }
 
 // lib/constants.ts
-var LEAD_STATUSES = [
-  "new",
-  "apollo_matched",
-  "bouncer_verified",
-  "instantly_loaded",
-  "replied",
-  "failed"
-];
+var LEAD_STATUS = {
+  NEW: "new",
+  APOLLO_MATCHED: "apollo_matched",
+  BOUNCER_VERIFIED: "bouncer_verified",
+  INSTANTLY_LOADED: "instantly_loaded",
+  REPLIED: "replied",
+  FAILED: "failed"
+};
+var LEAD_STATUSES = Object.values(LEAD_STATUS);
 function isValidLeadStatus(status) {
   return LEAD_STATUSES.includes(status);
 }
+var BOUNCER_RESULT = {
+  /** Email is valid and deliverable */
+  DELIVERABLE: "deliverable",
+  /** Email is invalid or does not exist */
+  UNDELIVERABLE: "undeliverable",
+  /** Email may be valid but has risk factors (catch-all, disposable, etc.) */
+  RISKY: "risky",
+  /** Bouncer could not determine status */
+  UNKNOWN: "unknown"
+};
+var BOUNCER_AUTO_HANDLED = [BOUNCER_RESULT.DELIVERABLE, BOUNCER_RESULT.UNDELIVERABLE];
 var CUSTOMER_REPLY_CATEGORIES = ["hot", "soft", "objection", "negative"];
 var NON_REPLY_CATEGORIES = ["out_of_office", "auto_reply", "not_a_reply"];
 var REPLY_CATEGORIES = [

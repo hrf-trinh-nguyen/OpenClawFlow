@@ -6,20 +6,61 @@ import { parseIntSafe } from './utils.js';
 
 // ── Lead Processing Statuses ────────────────────────────────────────
 
-export const LEAD_STATUSES = [
-  'new',
-  'apollo_matched',
-  'bouncer_verified',
-  'instantly_loaded',
-  'replied',
-  'failed',
-] as const;
+export const LEAD_STATUS = {
+  NEW: 'new',
+  APOLLO_MATCHED: 'apollo_matched',
+  BOUNCER_VERIFIED: 'bouncer_verified',
+  INSTANTLY_LOADED: 'instantly_loaded',
+  REPLIED: 'replied',
+  FAILED: 'failed',
+} as const;
 
-export type LeadStatus = (typeof LEAD_STATUSES)[number];
+export const LEAD_STATUSES = Object.values(LEAD_STATUS);
+
+export type LeadStatus = (typeof LEAD_STATUS)[keyof typeof LEAD_STATUS];
 
 export function isValidLeadStatus(status: string): status is LeadStatus {
   return LEAD_STATUSES.includes(status as LeadStatus);
 }
+
+// ── Bouncer Result Statuses ────────────────────────────────────────
+
+export const BOUNCER_RESULT = {
+  /** Email is valid and deliverable */
+  DELIVERABLE: 'deliverable',
+  /** Email is invalid or does not exist */
+  UNDELIVERABLE: 'undeliverable',
+  /** Email may be valid but has risk factors (catch-all, disposable, etc.) */
+  RISKY: 'risky',
+  /** Bouncer could not determine status */
+  UNKNOWN: 'unknown',
+} as const;
+
+export type BouncerResultStatus = (typeof BOUNCER_RESULT)[keyof typeof BOUNCER_RESULT];
+
+/** Statuses that are auto-handled without human review */
+export const BOUNCER_AUTO_HANDLED = [BOUNCER_RESULT.DELIVERABLE, BOUNCER_RESULT.UNDELIVERABLE] as const;
+
+export function isBouncerAutoHandled(status: string): boolean {
+  return BOUNCER_AUTO_HANDLED.includes(status as (typeof BOUNCER_AUTO_HANDLED)[number]);
+}
+
+// ── Email Status (stored in leads.email_status) ────────────────────
+
+export const EMAIL_STATUS = {
+  DELIVERABLE: 'deliverable',
+  UNDELIVERABLE: 'undeliverable',
+} as const;
+
+export type EmailStatus = (typeof EMAIL_STATUS)[keyof typeof EMAIL_STATUS];
+
+// ── Failure Reasons ────────────────────────────────────────────────
+
+export const FAILURE_REASON = {
+  EMAIL_NOT_DELIVERABLE: 'Email not deliverable',
+  API_ERROR: 'API error',
+  TIMEOUT: 'Timeout',
+} as const;
 
 // ── Reply Categories ────────────────────────────────────────────────
 // Real customer reply (message from lead): hot, soft, objection, negative.

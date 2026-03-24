@@ -225,7 +225,84 @@ function getDateRange(fromEnv, toEnv, singleEnv) {
   return { min: localStart.toISOString(), max: localEnd.toISOString() };
 }
 
+// lib/slack-templates.ts
+function buildProcessRepliesMessage(p) {
+  const totalClassified = p.hot + p.soft + p.objection + p.negative + (p.outOfOffice ?? 0) + (p.autoReply ?? 0) + (p.notAReply ?? 0);
+  const customerTotal = p.hot + p.soft + p.objection + p.negative;
+  const notCustomer = (p.outOfOffice ?? 0) + (p.autoReply ?? 0) + (p.notAReply ?? 0);
+  const lines = [
+    `\u{1F4EC} *Process Replies Report*`,
+    `Date: ${p.date}${p.runAtET ? `  \xB7  Run: ${p.runAtET}` : ""}${p.durationSec !== void 0 ? `  \xB7  ${p.durationSec}s` : ""}`,
+    `\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550`,
+    ``,
+    `*Inbox*`,
+    `\u2022 Unread (API): ${p.unreadCount ?? "\u2014"}`,
+    `\u2022 Fetched this run: ${p.repliesFetched}`,
+    `\u2022 Total classified: ${totalClassified}`,
+    ``,
+    `*Customer reply (classified)*`,
+    `\u2022 Hot: ${p.hot}  \xB7  Soft: ${p.soft}  \xB7  Objection: ${p.objection}  \xB7  Negative: ${p.negative}`,
+    `\u2022 Subtotal: ${customerTotal}`,
+    ``,
+    `*Not customer reply*`,
+    `\u2022 Out of office: ${p.outOfOffice ?? 0}  \xB7  Auto-reply: ${p.autoReply ?? 0}  \xB7  Not a reply: ${p.notAReply ?? 0}`,
+    `\u2022 Subtotal: ${notCustomer}`,
+    ``,
+    `*Actions*`,
+    `\u2022 Auto-replied (hot): ${p.autoReplied}`,
+    `\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550`
+  ];
+  return lines.join("\n");
+}
+async function postSlackMessage(channel, text) {
+  const token = process.env.SLACK_BOT_TOKEN;
+  if (!token || !channel) return false;
+  try {
+    const res = await fetch("https://slack.com/api/chat.postMessage", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ channel, text })
+    });
+    if (!res.ok) return false;
+    const json = await res.json();
+    return json.ok === true;
+  } catch {
+    return false;
+  }
+}
+function postToReportChannel(text) {
+  const channel = process.env.SLACK_REPORT_CHANNEL || "";
+  return postSlackMessage(channel, text);
+}
+function postToAlertChannel(text) {
+  const channel = process.env.SLACK_ALERT_CHANNEL || "";
+  return postSlackMessage(channel, text);
+}
+
 // lib/constants.ts
+var LEAD_STATUS = {
+  NEW: "new",
+  APOLLO_MATCHED: "apollo_matched",
+  BOUNCER_VERIFIED: "bouncer_verified",
+  INSTANTLY_LOADED: "instantly_loaded",
+  REPLIED: "replied",
+  FAILED: "failed"
+};
+var LEAD_STATUSES = Object.values(LEAD_STATUS);
+var BOUNCER_RESULT = {
+  /** Email is valid and deliverable */
+  DELIVERABLE: "deliverable",
+  /** Email is invalid or does not exist */
+  UNDELIVERABLE: "undeliverable",
+  /** Email may be valid but has risk factors (catch-all, disposable, etc.) */
+  RISKY: "risky",
+  /** Bouncer could not determine status */
+  UNKNOWN: "unknown"
+};
+var BOUNCER_AUTO_HANDLED = [BOUNCER_RESULT.DELIVERABLE, BOUNCER_RESULT.UNDELIVERABLE];
 var CUSTOMER_REPLY_CATEGORIES = ["hot", "soft", "objection", "negative"];
 var NON_REPLY_CATEGORIES = ["out_of_office", "auto_reply", "not_a_reply"];
 var REPLY_CATEGORIES = [
@@ -374,93 +451,52 @@ var HOT_SIGNAL_PHRASES = [
   "hear more about it"
 ];
 
-// lib/slack-templates.ts
-function buildProcessRepliesMessage(p) {
-  const totalClassified = p.hot + p.soft + p.objection + p.negative + (p.outOfOffice ?? 0) + (p.autoReply ?? 0) + (p.notAReply ?? 0);
-  const customerTotal = p.hot + p.soft + p.objection + p.negative;
-  const notCustomer = (p.outOfOffice ?? 0) + (p.autoReply ?? 0) + (p.notAReply ?? 0);
-  const lines = [
-    `\u{1F4EC} *Process Replies Report*`,
-    `Date: ${p.date}${p.runAtET ? `  \xB7  Run: ${p.runAtET}` : ""}${p.durationSec !== void 0 ? `  \xB7  ${p.durationSec}s` : ""}`,
-    `\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550`,
-    ``,
-    `*Inbox*`,
-    `\u2022 Unread (API): ${p.unreadCount ?? "\u2014"}`,
-    `\u2022 Fetched this run: ${p.repliesFetched}`,
-    `\u2022 Total classified: ${totalClassified}`,
-    ``,
-    `*Customer reply (classified)*`,
-    `\u2022 Hot: ${p.hot}  \xB7  Soft: ${p.soft}  \xB7  Objection: ${p.objection}  \xB7  Negative: ${p.negative}`,
-    `\u2022 Subtotal: ${customerTotal}`,
-    ``,
-    `*Not customer reply*`,
-    `\u2022 Out of office: ${p.outOfOffice ?? 0}  \xB7  Auto-reply: ${p.autoReply ?? 0}  \xB7  Not a reply: ${p.notAReply ?? 0}`,
-    `\u2022 Subtotal: ${notCustomer}`,
-    ``,
-    `*Actions*`,
-    `\u2022 Auto-replied (hot): ${p.autoReplied}`,
-    `\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550`
-  ];
-  return lines.join("\n");
-}
-async function postSlackMessage(channel, text) {
-  const token = process.env.SLACK_BOT_TOKEN;
-  if (!token || !channel) return false;
-  try {
-    const res = await fetch("https://slack.com/api/chat.postMessage", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ channel, text })
-    });
-    if (!res.ok) return false;
-    const json = await res.json();
-    return json.ok === true;
-  } catch {
-    return false;
+// lib/errors.ts
+var OpenClawError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "OpenClawError";
   }
+};
+var ApiError = class extends OpenClawError {
+  constructor(service, statusCode, message) {
+    super(`[${service}] ${message}`);
+    this.service = service;
+    this.statusCode = statusCode;
+    this.name = "ApiError";
+  }
+};
+var InstantlyApiError = class extends ApiError {
+  constructor(operation, statusCode, message) {
+    super("Instantly", statusCode, `${operation}: ${message}`);
+    this.operation = operation;
+    this.name = "InstantlyApiError";
+  }
+  /** IDs of leads successfully processed before the error (for partial recovery) */
+  partialSuccessIds = [];
+  /** Attach IDs of leads that were successfully processed before the error */
+  withPartialSuccess(ids) {
+    this.partialSuccessIds = [...ids];
+    return this;
+  }
+};
+var OpenAiApiError = class extends ApiError {
+  constructor(statusCode, message) {
+    super("OpenAI", statusCode, message);
+    this.name = "OpenAiApiError";
+  }
+};
+function isInstantlyApiError(error) {
+  return error instanceof InstantlyApiError;
 }
-function postToReportChannel(text) {
-  const channel = process.env.SLACK_REPORT_CHANNEL || "";
-  return postSlackMessage(channel, text);
-}
-function postToAlertChannel(text) {
-  const channel = process.env.SLACK_ALERT_CHANNEL || "";
-  return postSlackMessage(channel, text);
+function getErrorMessage(error) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  return String(error);
 }
 
-// skills/instantly/index.ts
-var INSTANTLY_API_KEY = process.env.INSTANTLY_API_KEY;
-var INSTANTLY_CAMPAIGN_ID = process.env.INSTANTLY_CAMPAIGN_ID;
-var OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-var MODE = process.env.MODE || "all";
-var LOAD_LIMIT = DEFAULTS.LOAD_LIMIT;
-var LOAD_DAILY_CAP = DEFAULTS.INSTANTLY_LOAD_DAILY_CAP;
-function shouldPostProcessRepliesSlackReport() {
-  return /^(1|true|yes)$/i.test(String(process.env.PROCESS_REPLIES_SLACK_REPORT || "").trim());
-}
-function validateEnv() {
-  validateRequiredEnv(["INSTANTLY_API_KEY", "INSTANTLY_CAMPAIGN_ID", "SUPABASE_DB_URL"]);
-  if ((MODE === "fetch" || MODE === "all") && !OPENAI_API_KEY) {
-    console.error("\u274C OPENAI_API_KEY required for fetch/classify mode");
-    process.exit(1);
-  }
-}
-function getFetchDateRange() {
-  return getDateRange(
-    process.env.FETCH_DATE_FROM,
-    process.env.FETCH_DATE_TO,
-    process.env.FETCH_DATE || process.env.REPORT_DATE
-  );
-}
-function attachPartialSuccessIds(error, ids) {
-  if (error && typeof error === "object" && ids.length > 0) {
-    error.partialSuccessIds = [...ids];
-  }
-}
-async function instantlyAddLeads(leads) {
+// skills/instantly/api.ts
+async function addLeads(apiKey, campaignId, leads) {
   var _a;
   if (leads.length === 0) return { success: 0, failed: 0, successIds: [] };
   let totalSuccess = 0;
@@ -472,7 +508,7 @@ async function instantlyAddLeads(leads) {
     const batch = leads.slice(offset, offset + batchSize);
     const batchNum = Math.floor(offset / batchSize) + 1;
     const body = {
-      campaign_id: INSTANTLY_CAMPAIGN_ID,
+      campaign_id: campaignId,
       skip_if_in_workspace: true,
       skip_if_in_campaign: true,
       leads: batch.map((l) => ({
@@ -488,7 +524,7 @@ async function instantlyAddLeads(leads) {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${INSTANTLY_API_KEY}`
+          Authorization: `Bearer ${apiKey}`
         },
         body: JSON.stringify(body)
       });
@@ -503,7 +539,9 @@ async function instantlyAddLeads(leads) {
           if (typeof c.index === "number" && ((_a = batch[c.index]) == null ? void 0 : _a.id)) {
             leadId = batch[c.index].id;
           } else if (c.email) {
-            const match = batch.find((l) => l.email && String(l.email).toLowerCase() === String(c.email).toLowerCase());
+            const match = batch.find(
+              (l) => l.email && String(l.email).toLowerCase() === String(c.email).toLowerCase()
+            );
             leadId = match == null ? void 0 : match.id;
           }
           if (leadId && !seen.has(leadId)) {
@@ -516,23 +554,27 @@ async function instantlyAddLeads(leads) {
         const invalid = data.invalid_email_count ?? 0;
         totalFailed += Math.max(0, batch.length - uploaded);
         if (successIds.length > 0 && successIds.length !== created.length) {
-          console.log(`   \u26A0\uFE0F  Mapping: ${successIds.length} lead IDs from ${created.length} created_leads (deduped by id)`);
+          console.log(
+            `   \u26A0\uFE0F  Mapping: ${successIds.length} lead IDs from ${created.length} created_leads (deduped by id)`
+          );
         }
         console.log(
           `   \u2705 Batch ${batchNum}/${totalBatches}: ${uploaded} uploaded (${successIds.length} confirmed for DB), ${skipped} skipped, ${duped} duped, ${invalid} invalid`
         );
       } else {
         const msg = data.message || data.error || "";
-        const detail = `Instantly add-leads failed: HTTP ${response.status} ${msg}`.trim();
+        const err = new InstantlyApiError("add-leads", response.status, `${response.status} ${msg}`);
+        err.withPartialSuccess(successIds);
         console.error(`   \u274C Batch ${batchNum}/${totalBatches} failed: ${response.status} ${msg}`);
-        const err = new Error(detail);
-        attachPartialSuccessIds(err, successIds);
         throw err;
       }
     } catch (error) {
-      console.error(`   \u274C Batch ${batchNum}/${totalBatches} error: ${error.message}`);
-      attachPartialSuccessIds(error, successIds);
-      throw error;
+      if (error instanceof InstantlyApiError) throw error;
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(`   \u274C Batch ${batchNum}/${totalBatches} error: ${msg}`);
+      const err = new InstantlyApiError("add-leads", null, msg);
+      err.withPartialSuccess(successIds);
+      throw err;
     }
     if (offset + batchSize < leads.length) {
       await sleep(RATE_LIMITS.INSTANTLY_DELAY_MS);
@@ -540,22 +582,21 @@ async function instantlyAddLeads(leads) {
   }
   return { success: totalSuccess, failed: totalFailed, successIds };
 }
-async function instantlyFetchReplies(limit = DEFAULTS.FETCH_LIMIT) {
+async function fetchReplies(apiKey, campaignId, dateRange, limit = 100) {
   const params = new URLSearchParams({
-    campaign_id: INSTANTLY_CAMPAIGN_ID || "",
+    campaign_id: campaignId,
     email_type: "received",
     sort_order: "asc",
-    limit: String(limit)
+    limit: String(limit),
+    min_timestamp_created: dateRange.min,
+    max_timestamp_created: dateRange.max
   });
-  const { min, max } = getFetchDateRange();
-  params.set("min_timestamp_created", min);
-  params.set("max_timestamp_created", max);
   const url = `${API_ENDPOINTS.INSTANTLY.EMAILS}?${params.toString()}`;
   const response = await fetch(url, {
-    headers: { Authorization: `Bearer ${INSTANTLY_API_KEY}` }
+    headers: { Authorization: `Bearer ${apiKey}` }
   });
   if (!response.ok) {
-    throw new Error(`Instantly fetch replies failed: ${response.status}`);
+    throw new InstantlyApiError("fetch", response.status, `${response.status}`);
   }
   const data = await response.json();
   const raw = data.items || data.emails || [];
@@ -571,23 +612,23 @@ async function instantlyFetchReplies(limit = DEFAULTS.FETCH_LIMIT) {
     };
   });
 }
-async function instantlyGetUnreadCount() {
-  const url = API_ENDPOINTS.INSTANTLY.UNREAD_COUNT(INSTANTLY_CAMPAIGN_ID || "");
+async function getUnreadCount(apiKey, campaignId) {
+  const url = API_ENDPOINTS.INSTANTLY.UNREAD_COUNT(campaignId);
   const response = await fetch(url, {
-    headers: { Authorization: `Bearer ${INSTANTLY_API_KEY}` }
+    headers: { Authorization: `Bearer ${apiKey}` }
   });
   if (!response.ok) {
-    throw new Error(`Instantly unread count failed: ${response.status}`);
+    throw new InstantlyApiError("unread-count", response.status, `${response.status}`);
   }
   const data = await response.json();
   return typeof data.count === "number" ? data.count : data.unread_count ?? 0;
 }
-async function instantlyReplyToEmail(params) {
+async function replyToEmail(apiKey, params) {
   const response = await fetch(API_ENDPOINTS.INSTANTLY.REPLY, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${INSTANTLY_API_KEY}`
+      Authorization: `Bearer ${apiKey}`
     },
     body: JSON.stringify({
       reply_to_uuid: params.reply_to_uuid,
@@ -598,87 +639,21 @@ async function instantlyReplyToEmail(params) {
   });
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`Instantly reply failed: ${response.status} ${text}`);
+    throw new InstantlyApiError("reply", response.status, `${response.status} ${text}`);
   }
 }
-var OOO_SUBJECT_PATTERNS = /out of office|ooo|automatic reply|abwesenheit|réponse automatique/i;
-var OOO_BODY_PATTERNS = /out of (the )?office|away from (my )?office|I am currently out|I will be out|back on \d|returning on \d|limited access to (my )?email/i;
-var AUTO_REPLY_PATTERNS = /automatic reply|auto.reply|vacation reply|I'm away|I am away|delivery receipt|read receipt|this is an automated/i;
-function getNonReplyCategory(subject, body) {
-  const sub = (subject || "").trim();
-  const text = (body || "").trim();
-  const combined = `${sub} ${text}`.toLowerCase();
-  if (OOO_SUBJECT_PATTERNS.test(sub) || OOO_BODY_PATTERNS.test(combined)) {
-    return "out_of_office";
-  }
-  if (AUTO_REPLY_PATTERNS.test(combined)) {
-    return "auto_reply";
-  }
-  return null;
-}
-async function classifyReply(subject, replyText) {
-  var _a, _b, _c;
-  const prompt = PROMPTS.CLASSIFICATION.replace("{SUBJECT}", subject || "(no subject)").replace("{REPLY_TEXT}", replyText || "(empty)");
-  const response = await fetch(API_ENDPOINTS.OPENAI.CHAT_COMPLETIONS, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${OPENAI_API_KEY}`
-    },
-    body: JSON.stringify({
-      model: CLASSIFICATION_MODEL,
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0,
-      response_format: { type: "json_object" }
-    })
-  });
-  if (!response.ok) {
-    throw new Error(`OpenAI API failed: ${response.status}`);
-  }
-  const data = await response.json();
-  const content = ((_c = (_b = (_a = data.choices) == null ? void 0 : _a[0]) == null ? void 0 : _b.message) == null ? void 0 : _c.content) || "";
-  const parsed = parseJsonSafe(content, {});
-  let rawCategory = (parsed.category || "").trim().toLowerCase();
-  if (!isValidReplyCategory(rawCategory)) rawCategory = "not_a_reply";
-  const confidence = typeof parsed.confidence === "number" ? parsed.confidence : 0;
-  if (parsed.reason && (rawCategory === "objection" || rawCategory === "hot")) {
-    console.log(`   [classify] ${rawCategory} (${confidence}): ${parsed.reason}`);
-  }
-  const bodyLower = (replyText || "").toLowerCase();
-  const hasHotSignal = HOT_SIGNAL_PHRASES.some((phrase) => bodyLower.includes(phrase.toLowerCase()));
-  const category = hasHotSignal && (rawCategory === "objection" || rawCategory === "soft") ? "hot" : rawCategory;
-  return {
-    category,
-    confidence
-  };
-}
-function buildHotReplyTemplate(firstName) {
-  const name = firstName || "there";
-  const { BOOK_NOW_URL, COMPARE_URL } = HOT_REPLY_TEMPLATE;
-  const html = `Awesome ${name},<br><br>You can schedule here: <a href="${BOOK_NOW_URL}">Book now</a><br><br>Have a look at this before we connect. Quickly covers us vs. alternatives.<br>\u{1F449} <a href="${COMPARE_URL}">Compare Design Pickle</a><br><br>See you then.<br>-Bryan Butvidas`;
-  const text = `Awesome ${name},
 
-You can schedule here: Book now
-${BOOK_NOW_URL}
-
-Have a look at this before we connect. Quickly covers us vs. alternatives.
-\u{1F449} Compare Design Pickle
-${COMPARE_URL}
-
-See you then.
--Bryan Butvidas`;
-  return { html, text };
-}
-async function runLoadService(db, runId) {
+// skills/instantly/load.ts
+async function runLoadService(db, runId, apiKey, campaignId) {
   console.log(`
 \u{1F4E4} Load Service: Pushing verified leads to Instantly...
 `);
   const loadedToday = await getInstantlyLoadedCountToday(db);
-  const remainingDaily = Math.max(0, LOAD_DAILY_CAP - loadedToday);
-  const limit = Math.min(LOAD_LIMIT, remainingDaily);
+  const remainingDaily = Math.max(0, DEFAULTS.INSTANTLY_LOAD_DAILY_CAP - loadedToday);
+  const limit = Math.min(DEFAULTS.LOAD_LIMIT, remainingDaily);
   if (limit === 0) {
     console.log(
-      `\u2139\uFE0F  Daily cap reached: ${loadedToday}/${LOAD_DAILY_CAP} loaded today. Skipping load.
+      `\u2139\uFE0F  Daily cap reached: ${loadedToday}/${DEFAULTS.INSTANTLY_LOAD_DAILY_CAP} loaded today. Skipping load.
 `
     );
     return { processed: 0, succeeded: 0, failed: 0 };
@@ -689,7 +664,7 @@ async function runLoadService(db, runId) {
     return { processed: 0, succeeded: 0, failed: 0 };
   }
   console.log(
-    `\u{1F4CA} Found ${verifiedLeads.length} verified leads (limit ${limit}, daily cap ${LOAD_DAILY_CAP}, already loaded today: ${loadedToday})
+    `\u{1F4CA} Found ${verifiedLeads.length} verified leads (limit ${limit}, daily cap ${DEFAULTS.INSTANTLY_LOAD_DAILY_CAP}, already loaded today: ${loadedToday})
 `
   );
   const execId = await createServiceExecution(db, {
@@ -699,9 +674,9 @@ async function runLoadService(db, runId) {
     input_count: verifiedLeads.length
   });
   try {
-    const { success, failed, successIds } = await instantlyAddLeads(verifiedLeads);
+    const { success, failed, successIds } = await addLeads(apiKey, campaignId, verifiedLeads);
     if (successIds.length > 0) {
-      await batchUpdateLeadStatus(db, successIds, "instantly_loaded");
+      await batchUpdateLeadStatus(db, successIds, LEAD_STATUS.INSTANTLY_LOADED);
       await db.query(
         `UPDATE leads SET last_contacted_at = NOW(), updated_at = NOW() WHERE id = ANY($1::uuid[])`,
         [successIds]
@@ -718,10 +693,10 @@ async function runLoadService(db, runId) {
 `);
     return { processed: verifiedLeads.length, succeeded: success, failed };
   } catch (error) {
-    const msg = (error == null ? void 0 : error.message) || String(error);
-    const partialIds = error.partialSuccessIds ?? [];
+    const msg = getErrorMessage(error);
+    const partialIds = isInstantlyApiError(error) ? error.partialSuccessIds : [];
     if (partialIds.length > 0) {
-      await batchUpdateLeadStatus(db, partialIds, "instantly_loaded");
+      await batchUpdateLeadStatus(db, partialIds, LEAD_STATUS.INSTANTLY_LOADED);
       await db.query(
         `UPDATE leads SET last_contacted_at = NOW(), updated_at = NOW() WHERE id = ANY($1::uuid[])`,
         [partialIds]
@@ -748,7 +723,138 @@ async function runLoadService(db, runId) {
     throw error;
   }
 }
-async function runFetchAndClassifyService(db, runId) {
+
+// skills/instantly/classify.ts
+var OOO_SUBJECT_PATTERNS = /out of office|ooo|automatic reply|abwesenheit|réponse automatique/i;
+var OOO_BODY_PATTERNS = /out of (the )?office|away from (my )?office|I am currently out|I will be out|back on \d|returning on \d|limited access to (my )?email/i;
+var AUTO_REPLY_PATTERNS = /automatic reply|auto.reply|vacation reply|I'm away|I am away|delivery receipt|read receipt|this is an automated/i;
+function getNonReplyCategory(subject, body) {
+  const sub = (subject || "").trim();
+  const text = (body || "").trim();
+  const combined = `${sub} ${text}`.toLowerCase();
+  if (OOO_SUBJECT_PATTERNS.test(sub) || OOO_BODY_PATTERNS.test(combined)) {
+    return "out_of_office";
+  }
+  if (AUTO_REPLY_PATTERNS.test(combined)) {
+    return "auto_reply";
+  }
+  return null;
+}
+async function classifyReply(apiKey, subject, replyText) {
+  var _a, _b, _c;
+  const prompt = PROMPTS.CLASSIFICATION.replace("{SUBJECT}", subject || "(no subject)").replace(
+    "{REPLY_TEXT}",
+    replyText || "(empty)"
+  );
+  const response = await fetch(API_ENDPOINTS.OPENAI.CHAT_COMPLETIONS, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model: CLASSIFICATION_MODEL,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0,
+      response_format: { type: "json_object" }
+    })
+  });
+  if (!response.ok) {
+    throw new OpenAiApiError(response.status, `Classification failed: ${response.status}`);
+  }
+  const data = await response.json();
+  const content = ((_c = (_b = (_a = data.choices) == null ? void 0 : _a[0]) == null ? void 0 : _b.message) == null ? void 0 : _c.content) || "";
+  const parsed = parseJsonSafe(content, {});
+  let rawCategory = (parsed.category || "").trim().toLowerCase();
+  if (!isValidReplyCategory(rawCategory)) rawCategory = "not_a_reply";
+  const confidence = typeof parsed.confidence === "number" ? parsed.confidence : 0;
+  if (parsed.reason && (rawCategory === "objection" || rawCategory === "hot")) {
+    console.log(`   [classify] ${rawCategory} (${confidence}): ${parsed.reason}`);
+  }
+  const bodyLower = (replyText || "").toLowerCase();
+  const hasHotSignal = HOT_SIGNAL_PHRASES.some((phrase) => bodyLower.includes(phrase.toLowerCase()));
+  const category = hasHotSignal && (rawCategory === "objection" || rawCategory === "soft") ? "hot" : rawCategory;
+  return { category, confidence };
+}
+async function classifyWithPrefilter(apiKey, subject, body) {
+  const nonReply = getNonReplyCategory(subject, body);
+  if (nonReply) {
+    return { category: nonReply, confidence: 1 };
+  }
+  return classifyReply(apiKey, subject, body);
+}
+
+// skills/instantly/templates.ts
+function buildHotReplyTemplate(firstName) {
+  const name = firstName || "there";
+  const { BOOK_NOW_URL, COMPARE_URL } = HOT_REPLY_TEMPLATE;
+  const html = `Awesome ${name},<br><br>You can schedule here: <a href="${BOOK_NOW_URL}">Book now</a><br><br>Have a look at this before we connect. Quickly covers us vs. alternatives.<br>\u{1F449} <a href="${COMPARE_URL}">Compare Design Pickle</a><br><br>See you then.<br>-Bryan Butvidas`;
+  const text = `Awesome ${name},
+
+You can schedule here: Book now
+${BOOK_NOW_URL}
+
+Have a look at this before we connect. Quickly covers us vs. alternatives.
+\u{1F449} Compare Design Pickle
+${COMPARE_URL}
+
+See you then.
+-Bryan Butvidas`;
+  return { html, text };
+}
+
+// skills/instantly/fetch.ts
+function getFetchDateRange() {
+  return getDateRange(
+    process.env.FETCH_DATE_FROM,
+    process.env.FETCH_DATE_TO,
+    process.env.FETCH_DATE || process.env.REPORT_DATE
+  );
+}
+async function handleHotLead(db, apiKey, reply) {
+  var _a, _b, _c;
+  if (!reply.email_id || !reply.eaccount) {
+    console.log(`   \u26A0\uFE0F  Skip reply (missing email_id/eaccount): ${reply.from_email}`);
+    return;
+  }
+  try {
+    const leadRes = await db.query(
+      `SELECT first_name FROM leads WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1`,
+      [reply.from_email]
+    );
+    const firstName = ((_b = (_a = leadRes.rows[0]) == null ? void 0 : _a.first_name) == null ? void 0 : _b.trim()) || "";
+    const { html, text } = buildHotReplyTemplate(firstName);
+    const subject = ((_c = reply.subject) == null ? void 0 : _c.startsWith("Re:")) ? reply.subject : `Re: ${reply.subject || "Your inquiry"}`;
+    await replyToEmail(apiKey, {
+      reply_to_uuid: reply.email_id,
+      eaccount: reply.eaccount,
+      subject,
+      body_html: html,
+      body_text: text
+    });
+    await db.query(`UPDATE replies SET replied_at = NOW(), updated_at = NOW() WHERE thread_id = $1`, [
+      reply.thread_id
+    ]);
+    console.log(`   \u{1F4E4} Replied to hot lead: ${reply.from_email}`);
+    await sleep(300);
+  } catch (err) {
+    console.error(`   \u274C Reply failed for ${reply.from_email}: ${getErrorMessage(err)}`);
+  }
+}
+async function blacklistLead(db, email) {
+  const leadRes = await db.query(
+    `SELECT id FROM leads WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1`,
+    [email]
+  );
+  if (leadRes.rows.length > 0) {
+    await db.query(
+      `UPDATE leads SET blacklisted = true, blacklist_reason = 'negative_reply', updated_at = NOW() WHERE id = $1`,
+      [leadRes.rows[0].id]
+    );
+    console.log(`   \u26D4 Blacklisted lead: ${email}`);
+  }
+}
+async function runFetchAndClassifyService(db, runId, apiKey, campaignId, openaiApiKey) {
   const { min, max } = getFetchDateRange();
   const dateLabel = process.env.FETCH_DATE_FROM && process.env.FETCH_DATE_TO ? `${process.env.FETCH_DATE_FROM} \u2192 ${process.env.FETCH_DATE_TO}` : process.env.FETCH_DATE || process.env.REPORT_DATE || "today";
   console.log(`
@@ -756,7 +862,7 @@ async function runFetchAndClassifyService(db, runId) {
 `);
   let unreadCount;
   try {
-    unreadCount = await instantlyGetUnreadCount();
+    unreadCount = await getUnreadCount(apiKey, campaignId);
     console.log(`   \u{1F4EC} Unread count: ${unreadCount}
 `);
   } catch {
@@ -767,7 +873,7 @@ async function runFetchAndClassifyService(db, runId) {
     status: "running"
   });
   try {
-    const replies = await instantlyFetchReplies(100);
+    const replies = await fetchReplies(apiKey, campaignId, { min, max }, DEFAULTS.FETCH_LIMIT);
     if (replies.length === 0) {
       console.log(`\u2139\uFE0F  No replies for ${dateLabel}
 `);
@@ -828,8 +934,7 @@ async function runFetchAndClassifyService(db, runId) {
       try {
         const subject = reply.subject || "";
         const body = reply.body || "";
-        const nonReply = getNonReplyCategory(subject, body);
-        const classification = nonReply ? { category: nonReply, confidence: 1 } : await classifyReply(subject, body);
+        const classification = await classifyWithPrefilter(openaiApiKey, subject, body);
         console.log(`   ${reply.from_email}: ${classification.category} (${classification.confidence})`);
         const bodySnippet = body.substring(0, 500);
         const threadId = reply.thread_id || `thread-${Date.now()}`;
@@ -859,7 +964,7 @@ async function runFetchAndClassifyService(db, runId) {
         switch (classification.category) {
           case "hot":
             hot++;
-            await handleHotLead(db, reply);
+            await handleHotLead(db, apiKey, reply);
             break;
           case "soft":
             soft++;
@@ -882,7 +987,7 @@ async function runFetchAndClassifyService(db, runId) {
             break;
         }
       } catch (error) {
-        console.error(`   \u274C Error processing ${reply.from_email}: ${error.message}`);
+        console.error(`   \u274C Error processing ${reply.from_email}: ${getErrorMessage(error)}`);
       }
       await sleep(RATE_LIMITS.INSTANTLY_DELAY_MS);
     }
@@ -896,8 +1001,10 @@ async function runFetchAndClassifyService(db, runId) {
     console.log(
       `   Customer replies: Hot ${hot}, Soft ${soft}, Objection ${objection}, Negative ${negative}`
     );
-    console.log(`   Not customer reply: Out of office ${out_of_office}, Auto-reply ${auto_reply}, Not a reply ${not_a_reply}
-`);
+    console.log(
+      `   Not customer reply: Out of office ${out_of_office}, Auto-reply ${auto_reply}, Not a reply ${not_a_reply}
+`
+    );
     return {
       processed: toProcess.length,
       hot,
@@ -912,52 +1019,30 @@ async function runFetchAndClassifyService(db, runId) {
     };
   } catch (error) {
     console.error(`
-\u274C Fetch & classify failed: ${error.message}
+\u274C Fetch & classify failed: ${getErrorMessage(error)}
 `);
     await updateServiceExecution(db, execId, {
       status: "failed",
       completed_at: /* @__PURE__ */ new Date(),
-      error_message: error.message
+      error_message: getErrorMessage(error)
     });
     throw error;
   }
 }
-async function handleHotLead(db, reply) {
-  var _a, _b, _c;
-  if (!reply.email_id || !reply.eaccount) {
-    console.log(`   \u26A0\uFE0F  Skip reply (missing email_id/eaccount): ${reply.from_email}`);
-    return;
-  }
-  try {
-    const leadRes = await db.query(
-      `SELECT first_name FROM leads WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1`,
-      [reply.from_email]
-    );
-    const firstName = ((_b = (_a = leadRes.rows[0]) == null ? void 0 : _a.first_name) == null ? void 0 : _b.trim()) || "";
-    const { html, text } = buildHotReplyTemplate(firstName);
-    const subject = ((_c = reply.subject) == null ? void 0 : _c.startsWith("Re:")) ? reply.subject : `Re: ${reply.subject || "Your inquiry"}`;
-    await instantlyReplyToEmail({
-      reply_to_uuid: reply.email_id,
-      eaccount: reply.eaccount,
-      subject,
-      body_html: html,
-      body_text: text
-    });
-    await db.query(`UPDATE replies SET replied_at = NOW(), updated_at = NOW() WHERE thread_id = $1`, [reply.thread_id]);
-    console.log(`   \u{1F4E4} Replied to hot lead: ${reply.from_email}`);
-    await sleep(300);
-  } catch (err) {
-    console.error(`   \u274C Reply failed for ${reply.from_email}: ${err.message}`);
-  }
+
+// skills/instantly/index.ts
+var INSTANTLY_API_KEY = process.env.INSTANTLY_API_KEY;
+var INSTANTLY_CAMPAIGN_ID = process.env.INSTANTLY_CAMPAIGN_ID;
+var OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+var MODE = process.env.MODE || "all";
+function shouldPostProcessRepliesSlackReport() {
+  return /^(1|true|yes)$/i.test(String(process.env.PROCESS_REPLIES_SLACK_REPORT || "").trim());
 }
-async function blacklistLead(db, email) {
-  const leadRes = await db.query(`SELECT id FROM leads WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1`, [email]);
-  if (leadRes.rows.length > 0) {
-    await db.query(
-      `UPDATE leads SET blacklisted = true, blacklist_reason = 'negative_reply', updated_at = NOW() WHERE id = $1`,
-      [leadRes.rows[0].id]
-    );
-    console.log(`   \u26D4 Blacklisted lead: ${email}`);
+function validateEnv() {
+  validateRequiredEnv(["INSTANTLY_API_KEY", "INSTANTLY_CAMPAIGN_ID", "SUPABASE_DB_URL"]);
+  if ((MODE === "fetch" || MODE === "all") && !OPENAI_API_KEY) {
+    console.error("\u274C OPENAI_API_KEY required for fetch/classify mode");
+    process.exit(1);
   }
 }
 async function main() {
@@ -979,14 +1064,20 @@ async function main() {
     let fetchResult = null;
     let fetchStartMs = Date.now();
     if (MODE === "load" || MODE === "all") {
-      const result = await runLoadService(db, runId);
+      const result = await runLoadService(db, runId, INSTANTLY_API_KEY, INSTANTLY_CAMPAIGN_ID);
       totalProcessed += result.processed;
       totalSucceeded += result.succeeded;
       totalFailed += result.failed;
     }
     if (MODE === "fetch" || MODE === "all") {
       fetchStartMs = Date.now();
-      const result = await runFetchAndClassifyService(db, runId);
+      const result = await runFetchAndClassifyService(
+        db,
+        runId,
+        INSTANTLY_API_KEY,
+        INSTANTLY_CAMPAIGN_ID,
+        OPENAI_API_KEY
+      );
       fetchResult = result;
       totalProcessed += result.processed;
       totalSucceeded += result.processed;

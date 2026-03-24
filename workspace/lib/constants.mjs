@@ -6,17 +6,41 @@ function parseIntSafe(value, fallback) {
 }
 
 // lib/constants.ts
-var LEAD_STATUSES = [
-  "new",
-  "apollo_matched",
-  "bouncer_verified",
-  "instantly_loaded",
-  "replied",
-  "failed"
-];
+var LEAD_STATUS = {
+  NEW: "new",
+  APOLLO_MATCHED: "apollo_matched",
+  BOUNCER_VERIFIED: "bouncer_verified",
+  INSTANTLY_LOADED: "instantly_loaded",
+  REPLIED: "replied",
+  FAILED: "failed"
+};
+var LEAD_STATUSES = Object.values(LEAD_STATUS);
 function isValidLeadStatus(status) {
   return LEAD_STATUSES.includes(status);
 }
+var BOUNCER_RESULT = {
+  /** Email is valid and deliverable */
+  DELIVERABLE: "deliverable",
+  /** Email is invalid or does not exist */
+  UNDELIVERABLE: "undeliverable",
+  /** Email may be valid but has risk factors (catch-all, disposable, etc.) */
+  RISKY: "risky",
+  /** Bouncer could not determine status */
+  UNKNOWN: "unknown"
+};
+var BOUNCER_AUTO_HANDLED = [BOUNCER_RESULT.DELIVERABLE, BOUNCER_RESULT.UNDELIVERABLE];
+function isBouncerAutoHandled(status) {
+  return BOUNCER_AUTO_HANDLED.includes(status);
+}
+var EMAIL_STATUS = {
+  DELIVERABLE: "deliverable",
+  UNDELIVERABLE: "undeliverable"
+};
+var FAILURE_REASON = {
+  EMAIL_NOT_DELIVERABLE: "Email not deliverable",
+  API_ERROR: "API error",
+  TIMEOUT: "Timeout"
+};
 var CUSTOMER_REPLY_CATEGORIES = ["hot", "soft", "objection", "negative"];
 var NON_REPLY_CATEGORIES = ["out_of_office", "auto_reply", "not_a_reply"];
 var REPLY_CATEGORIES = [
@@ -191,12 +215,17 @@ var HOT_SIGNAL_PHRASES = [
 export {
   API_ENDPOINTS,
   APOLLO_ICP_DEFAULTS,
+  BOUNCER_AUTO_HANDLED,
+  BOUNCER_RESULT,
   CLASSIFICATION_MODEL,
   CUSTOMER_REPLY_CATEGORIES,
   DEFAULTS,
+  EMAIL_STATUS,
+  FAILURE_REASON,
   FALLBACK_LIMITS,
   HOT_REPLY_TEMPLATE,
   HOT_SIGNAL_PHRASES,
+  LEAD_STATUS,
   LEAD_STATUSES,
   LIMIT_ENV,
   NON_REPLY_CATEGORIES,
@@ -204,6 +233,7 @@ export {
   RATE_LIMITS,
   REPLY_CATEGORIES,
   SLACK_CHANNELS,
+  isBouncerAutoHandled,
   isCustomerReplyCategory,
   isValidLeadStatus,
   isValidReplyCategory
