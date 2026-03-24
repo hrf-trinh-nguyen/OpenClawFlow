@@ -216,7 +216,11 @@ var BOUNCER_RESULT = {
 var BOUNCER_AUTO_HANDLED = [BOUNCER_RESULT.DELIVERABLE, BOUNCER_RESULT.UNDELIVERABLE];
 var EMAIL_STATUS = {
   DELIVERABLE: "deliverable",
-  UNDELIVERABLE: "undeliverable"
+  UNDELIVERABLE: "undeliverable",
+  /** Bouncer `risky` — not treated as undeliverable; still `bouncer_verified`. */
+  RISKY: "risky",
+  /** Bouncer `unknown` or unrecognized status. */
+  UNKNOWN: "unknown"
 };
 var FAILURE_REASON = {
   EMAIL_NOT_DELIVERABLE: "Email not deliverable",
@@ -436,6 +440,8 @@ function partitionResults(results, batch, emailsSent) {
   const seen = /* @__PURE__ */ new Set();
   const deliverableIds = [];
   const failedIds = [];
+  const riskyIds = [];
+  const unknownIds = [];
   for (const result of results) {
     const email = typeof (result == null ? void 0 : result.email) === "string" ? result.email.trim() : "";
     if (!email) continue;
@@ -447,11 +453,12 @@ function partitionResults(results, batch, emailsSent) {
       deliverableIds.push(lead.id);
     } else if (status === BOUNCER_RESULT.UNDELIVERABLE) {
       failedIds.push(lead.id);
+    } else if (status === BOUNCER_RESULT.RISKY) {
+      riskyIds.push(lead.id);
+    } else if (status === BOUNCER_RESULT.UNKNOWN || status === "") {
+      unknownIds.push(lead.id);
     } else {
-      return {
-        ok: false,
-        reason: `Unexpected status "${status || "(empty)"}" for \`${email}\`. Only deliverable + undeliverable are auto-handled; risky/unknown stops the run.`
-      };
+      unknownIds.push(lead.id);
     }
   }
   for (const e of emailsSent) {
@@ -459,7 +466,7 @@ function partitionResults(results, batch, emailsSent) {
       return { ok: false, reason: `Response missing result row for \`${e}\`` };
     }
   }
-  return { ok: true, deliverableIds, failedIds };
+  return { ok: true, deliverableIds, failedIds, riskyIds, unknownIds };
 }
 
 // skills/bouncer/pause.ts
@@ -539,6 +546,8 @@ async function main() {
   });
   let totalProcessed = 0;
   let totalDeliverable = 0;
+  let totalRisky = 0;
+  let totalUnknown = 0;
   let totalInvalid = 0;
   let apiCallsMade = 0;
   let apiErrors = 0;
@@ -589,7 +598,7 @@ async function main() {
           console.error(`   \u274C ${detail}
 `);
           const slackText = [
-            `\u{1F6A8} *Bouncer STOPPED* (unexpected result \u2014 not a normal undeliverable email)`,
+            `\u{1F6A8} *Bouncer STOPPED* \u2014 incomplete Bouncer response (missing result row)`,
             detail,
             `Batch id: \`${batchId}\``,
             `_No further batches this run. Leads in this batch were not updated._`
@@ -605,26 +614,42 @@ async function main() {
           pipelineAborted = true;
           break;
         }
-        const { deliverableIds, failedIds } = part;
+        const { deliverableIds, failedIds, riskyIds, unknownIds } = part;
         if (deliverableIds.length > 0) {
           await batchUpdateLeadStatus(db, deliverableIds, LEAD_STATUS.BOUNCER_VERIFIED);
-          await db.query(`UPDATE leads SET email_status = $1 WHERE id = ANY($2::uuid[])`, [
+          await db.query(`UPDATE leads SET email_status = $1::email_status WHERE id = ANY($2::uuid[])`, [
             EMAIL_STATUS.DELIVERABLE,
             deliverableIds
           ]);
         }
+        if (riskyIds.length > 0) {
+          await batchUpdateLeadStatus(db, riskyIds, LEAD_STATUS.BOUNCER_VERIFIED);
+          await db.query(`UPDATE leads SET email_status = $1::email_status WHERE id = ANY($2::uuid[])`, [
+            EMAIL_STATUS.RISKY,
+            riskyIds
+          ]);
+        }
+        if (unknownIds.length > 0) {
+          await batchUpdateLeadStatus(db, unknownIds, LEAD_STATUS.BOUNCER_VERIFIED);
+          await db.query(`UPDATE leads SET email_status = $1::email_status WHERE id = ANY($2::uuid[])`, [
+            EMAIL_STATUS.UNKNOWN,
+            unknownIds
+          ]);
+        }
         if (failedIds.length > 0) {
           await batchUpdateLeadStatus(db, failedIds, LEAD_STATUS.FAILED, FAILURE_REASON.EMAIL_NOT_DELIVERABLE);
-          await db.query(`UPDATE leads SET email_status = $1 WHERE id = ANY($2::uuid[])`, [
+          await db.query(`UPDATE leads SET email_status = $1::email_status WHERE id = ANY($2::uuid[])`, [
             EMAIL_STATUS.UNDELIVERABLE,
             failedIds
           ]);
         }
         totalDeliverable += deliverableIds.length;
+        totalRisky += riskyIds.length;
+        totalUnknown += unknownIds.length;
         totalInvalid += failedIds.length;
         totalProcessed += uniqueBatch.length;
         console.log(
-          `   \u2705 Batch ${batchNum} complete: ${deliverableIds.length} deliverable, ${failedIds.length} undeliverable`
+          `   \u2705 Batch ${batchNum} complete: ${deliverableIds.length} deliverable, ${riskyIds.length} risky, ${unknownIds.length} unknown, ${failedIds.length} undeliverable`
         );
         console.log(
           `   \u{1F4CA} Progress: ${totalProcessed}/${pendingLeads.length} (${Math.round(totalProcessed / pendingLeads.length * 100)}%)
@@ -633,7 +658,7 @@ async function main() {
         await updateServiceExecution(db, execId, {
           status: "completed",
           completed_at: /* @__PURE__ */ new Date(),
-          output_count: deliverableIds.length,
+          output_count: deliverableIds.length + riskyIds.length + unknownIds.length,
           failed_count: failedIds.length,
           api_calls_made: 2
         });
@@ -667,7 +692,7 @@ async function main() {
         status: "failed",
         completed_at: /* @__PURE__ */ new Date(),
         leads_processed: totalProcessed,
-        leads_succeeded: totalDeliverable,
+        leads_succeeded: totalDeliverable + totalRisky + totalUnknown,
         leads_failed: totalInvalid,
         error_message: abortReason
       });
@@ -680,14 +705,18 @@ async function main() {
       status: "completed",
       completed_at: /* @__PURE__ */ new Date(),
       leads_processed: totalProcessed,
-      leads_succeeded: totalDeliverable,
+      leads_succeeded: totalDeliverable + totalRisky + totalUnknown,
       leads_failed: totalInvalid
     });
+    const verifiedTotal = totalDeliverable + totalRisky + totalUnknown;
     const deliverableRate = totalProcessed > 0 ? (totalDeliverable / totalProcessed * 100).toFixed(1) : "0.0";
     console.log(`
 \u2705 Bouncer Service Complete`);
     console.log(`   Total processed: ${totalProcessed} leads`);
     console.log(`   Deliverable: ${totalDeliverable} (${deliverableRate}%)`);
+    console.log(`   Risky (verified): ${totalRisky}`);
+    console.log(`   Unknown (verified): ${totalUnknown}`);
+    console.log(`   Verified total (deliverable+risky+unknown): ${verifiedTotal}`);
     console.log(`   Invalid (undeliverable): ${totalInvalid}`);
     console.log(`   API calls made: ${apiCallsMade}`);
     console.log(`   API errors: ${apiErrors}
@@ -707,7 +736,7 @@ async function main() {
       status: "failed",
       completed_at: /* @__PURE__ */ new Date(),
       leads_processed: totalProcessed,
-      leads_succeeded: totalDeliverable,
+      leads_succeeded: totalDeliverable + totalRisky + totalUnknown,
       leads_failed: totalInvalid,
       error_message: msg
     });

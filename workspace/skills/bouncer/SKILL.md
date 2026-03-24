@@ -14,8 +14,10 @@ Autonomous email verification service using Bouncer batch API.
 2. **Submit batches** to Bouncer (100 emails/batch, API limit)
 3. **Poll for results** (5-second intervals, max 5 minutes)
 4. **Update database**:
-   - Deliverable → `processing_status='bouncer_verified'`
-   - Invalid → `processing_status='failed'`
+   - `deliverable` → `bouncer_verified` + `email_status='deliverable'`
+   - `risky` → `bouncer_verified` + `email_status='risky'` (still eligible for Instantly load)
+   - `unknown` (or unrecognized status) → `bouncer_verified` + `email_status='unknown'`
+   - `undeliverable` → `failed` + `email_status='undeliverable'`
 5. **Track progress** in `pipeline_runs` and `service_executions`
 
 ## Parameters (ENV variables)
@@ -23,7 +25,7 @@ Autonomous email verification service using Bouncer batch API.
 - `BOUNCER_API_KEY`: Bouncer API key (required)
 - `BOUNCER_BATCH_SIZE`: emails per API batch (default: 100, max: 1000 per Bouncer)
 - `BOUNCER_PER_RUN_MAX`: max leads per cron run (shell `run-build-list.sh`; default 100, from `FALLBACK_LIMITS`)
-- `SLACK_BOT_TOKEN` + `SLACK_ALERT_CHANNEL`: alerts when the run aborts (unexpected Bouncer status or API error)
+- `SLACK_BOT_TOKEN` + `SLACK_ALERT_CHANNEL`: alerts on **API/technical** failures or **incomplete** Bouncer response (missing result row)
 
 ## Execute
 
@@ -35,14 +37,16 @@ node workspace/skills/bouncer/index.mjs
 ## Output
 
 Updates database:
-- Deliverable leads: `processing_status='bouncer_verified'` + `email_status='deliverable'`
-- Invalid leads: `processing_status='failed'` + `email_status='undeliverable'`
+- Deliverable: `bouncer_verified` + `email_status='deliverable'`
+- Risky / unknown: `bouncer_verified` + `email_status='risky'` or `'unknown'` (not treated as undeliverable)
+- Invalid: `failed` + `email_status='undeliverable'`
 
 ## Error Handling
 
-- **Normal “bad email”**: Bouncer status `undeliverable` → lead `failed` with reason `Email not deliverable` (processing continues).
-- **Unexpected result** (`risky`, `unknown`, missing row, or any status other than `deliverable` / `undeliverable`): **Stops immediately** — no DB updates for that batch, **`SLACK_ALERT_CHANNEL`** notified (requires `SLACK_BOT_TOKEN` + `SLACK_ALERT_CHANNEL`), exit code 1.
-- **API / technical errors** (submit, poll, download, timeout, 402, etc.): **Stops immediately** — leads in that batch are **not** mass-marked failed; **Slack alert**; writes `state/bouncer-paused` so **cron skips Bouncer** until you fix the API or a **successful** run removes the file; exit 1.
+- **Normal “bad email”**: Bouncer `undeliverable` → lead `failed` with reason `Email not deliverable` (batch continues).
+- **Risky / unknown / any other Bouncer string**: mapped to `bouncer_verified` with the appropriate `email_status` — **run does not stop** for result status alone.
+- **Incomplete response** (submitted email missing from Bouncer download): **Stops** that run — no DB updates for that batch; **`SLACK_ALERT_CHANNEL`** notified; exit 1.
+- **API / technical errors** (submit, poll, download, timeout, 402, etc.): **Stops** — leads in that batch are **not** mass-marked failed; **Slack alert**; writes `state/bouncer-paused` so **cron skips Bouncer** until you fix the API or a **successful** run removes the file; exit 1.
 
 ## Database Tables Updated
 

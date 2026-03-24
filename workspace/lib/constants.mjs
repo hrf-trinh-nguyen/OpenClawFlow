@@ -34,7 +34,11 @@ function isBouncerAutoHandled(status) {
 }
 var EMAIL_STATUS = {
   DELIVERABLE: "deliverable",
-  UNDELIVERABLE: "undeliverable"
+  UNDELIVERABLE: "undeliverable",
+  /** Bouncer `risky` — not treated as undeliverable; still `bouncer_verified`. */
+  RISKY: "risky",
+  /** Bouncer `unknown` or unrecognized status. */
+  UNKNOWN: "unknown"
 };
 var FAILURE_REASON = {
   EMAIL_NOT_DELIVERABLE: "Email not deliverable",

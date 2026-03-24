@@ -6,8 +6,8 @@
  */
 
 import { sleep } from '../../lib/utils.js';
-import { RATE_LIMITS, API_ENDPOINTS, BOUNCER_RESULT, isBouncerAutoHandled } from '../../lib/constants.js';
-import { BouncerApiError, BouncerUnexpectedResultError } from '../../lib/errors.js';
+import { RATE_LIMITS, API_ENDPOINTS, BOUNCER_RESULT } from '../../lib/constants.js';
+import { BouncerApiError } from '../../lib/errors.js';
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -21,6 +21,10 @@ export interface PartitionResult {
   ok: true;
   deliverableIds: string[];
   failedIds: string[];
+  /** `bouncer_verified` + email_status risky */
+  riskyIds: string[];
+  /** `bouncer_verified` + email_status unknown (includes unrecognized Bouncer strings) */
+  unknownIds: string[];
 }
 
 export interface PartitionError {
@@ -119,10 +123,12 @@ export async function pollBatch(
 // ── Result Processing ──────────────────────────────────────────────
 
 /**
- * Partition Bouncer results into deliverable and failed IDs.
- *
- * Only `deliverable` and `undeliverable` are auto-handled.
- * `risky` / `unknown` / missing results → abort to avoid burning credits.
+ * Map Bouncer per-email results to DB updates.
+ * - deliverable → bouncer_verified + email_status deliverable
+ * - undeliverable → failed + undeliverable
+ * - risky → bouncer_verified + email_status risky (not failed)
+ * - unknown / anything else → bouncer_verified + email_status unknown
+ * Only missing rows for submitted emails returns ok: false (response incomplete).
  */
 export function partitionResults(
   results: BouncerResult[],
@@ -132,6 +138,8 @@ export function partitionResults(
   const seen = new Set<string>();
   const deliverableIds: string[] = [];
   const failedIds: string[] = [];
+  const riskyIds: string[] = [];
+  const unknownIds: string[] = [];
 
   for (const result of results) {
     const email = typeof result?.email === 'string' ? result.email.trim() : '';
@@ -146,11 +154,13 @@ export function partitionResults(
       deliverableIds.push(lead.id);
     } else if (status === BOUNCER_RESULT.UNDELIVERABLE) {
       failedIds.push(lead.id);
+    } else if (status === BOUNCER_RESULT.RISKY) {
+      riskyIds.push(lead.id);
+    } else if (status === BOUNCER_RESULT.UNKNOWN || status === '') {
+      unknownIds.push(lead.id);
     } else {
-      return {
-        ok: false,
-        reason: `Unexpected status "${status || '(empty)'}" for \`${email}\`. Only deliverable + undeliverable are auto-handled; risky/unknown stops the run.`,
-      };
+      // Unrecognized Bouncer status string — store as unknown, still verified for pipeline
+      unknownIds.push(lead.id);
     }
   }
 
@@ -160,5 +170,5 @@ export function partitionResults(
     }
   }
 
-  return { ok: true, deliverableIds, failedIds };
+  return { ok: true, deliverableIds, failedIds, riskyIds, unknownIds };
 }

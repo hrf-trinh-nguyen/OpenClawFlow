@@ -38,7 +38,7 @@ export const BOUNCER_RESULT = {
 
 export type BouncerResultStatus = (typeof BOUNCER_RESULT)[keyof typeof BOUNCER_RESULT];
 
-/** Statuses that are auto-handled without human review */
+/** Legacy: deliverable + undeliverable only (see `BOUNCER_RESULT` for full API statuses). */
 export const BOUNCER_AUTO_HANDLED = [BOUNCER_RESULT.DELIVERABLE, BOUNCER_RESULT.UNDELIVERABLE] as const;
 
 export function isBouncerAutoHandled(status: string): boolean {
@@ -50,6 +50,10 @@ export function isBouncerAutoHandled(status: string): boolean {
 export const EMAIL_STATUS = {
   DELIVERABLE: 'deliverable',
   UNDELIVERABLE: 'undeliverable',
+  /** Bouncer `risky` — not treated as undeliverable; still `bouncer_verified`. */
+  RISKY: 'risky',
+  /** Bouncer `unknown` or unrecognized status. */
+  UNKNOWN: 'unknown',
 } as const;
 
 export type EmailStatus = (typeof EMAIL_STATUS)[keyof typeof EMAIL_STATUS];
