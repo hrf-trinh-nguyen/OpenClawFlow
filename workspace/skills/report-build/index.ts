@@ -8,7 +8,11 @@
  *
  * ENV: REPORT_DATE (default: today)
  *      INSTANTLY_API_KEY
- *      INSTANTLY_CAMPAIGN_ID (single) or INSTANTLY_CAMPAIGN_IDS (comma-separated)
+ *      INSTANTLY_REPORT_ALL_CAMPAIGNS — default on: list campaigns via GET /api/v2/campaigns and
+ *        aggregate daily analytics for every campaign. Set to 0/false/off to use only
+ *        INSTANTLY_CAMPAIGN_ID / INSTANTLY_CAMPAIGN_IDS (legacy).
+ *      INSTANTLY_CAMPAIGN_ID (single) or INSTANTLY_CAMPAIGN_IDS (comma-separated) — fallback or when
+ *        INSTANTLY_REPORT_ALL_CAMPAIGNS=0
  */
 
 import { stateSet } from '../../lib/state.js';
@@ -39,13 +43,75 @@ interface InstantlyDailyRow {
 }
 
 /** Get campaign IDs from env: INSTANTLY_CAMPAIGN_IDS (comma) or INSTANTLY_CAMPAIGN_ID */
-function getCampaignIds(): string[] {
+function getCampaignIdsFromEnv(): string[] {
   const ids = process.env.INSTANTLY_CAMPAIGN_IDS;
   if (ids) {
     return ids.split(',').map((s) => s.trim()).filter(Boolean);
   }
   const id = process.env.INSTANTLY_CAMPAIGN_ID;
   return id ? [id] : [];
+}
+
+/** When unset or empty, default to listing all campaigns from the API (aggregate day totals). */
+function useInstantlyReportAllCampaignsFromApi(): boolean {
+  const v = process.env.INSTANTLY_REPORT_ALL_CAMPAIGNS;
+  if (v === undefined || String(v).trim() === '') return true;
+  return !/^(0|false|no|off)$/i.test(String(v).trim());
+}
+
+/** Paginated GET /api/v2/campaigns (limit max 100, starting_after cursor). */
+async function fetchAllCampaignIdsFromApi(apiKey: string): Promise<string[]> {
+  const out: string[] = [];
+  let startingAfter: string | undefined;
+
+  for (;;) {
+    const url = new URL(API_ENDPOINTS.INSTANTLY.CAMPAIGNS_LIST);
+    url.searchParams.set('limit', '100');
+    if (startingAfter) url.searchParams.set('starting_after', startingAfter);
+
+    const res = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (!res.ok) {
+      console.warn(`Report: list campaigns HTTP ${res.status} — stopping pagination.`);
+      break;
+    }
+
+    const data = (await res.json()) as {
+      items?: Array<{ id?: string }>;
+      next_starting_after?: string;
+    };
+    const items = Array.isArray(data.items) ? data.items : [];
+    for (const item of items) {
+      if (item?.id) out.push(item.id);
+    }
+
+    const next = data.next_starting_after;
+    if (!next || items.length === 0) break;
+    startingAfter = next;
+  }
+
+  return out;
+}
+
+async function resolveCampaignIds(apiKey: string | undefined): Promise<string[]> {
+  const fromApi = useInstantlyReportAllCampaignsFromApi();
+  if (fromApi && apiKey) {
+    const ids = await fetchAllCampaignIdsFromApi(apiKey);
+    if (ids.length > 0) {
+      console.log(`Report: Instantly — ${ids.length} campaign(s) from API list (aggregated for ${process.env.REPORT_DATE || 'today'}).`);
+      return ids;
+    }
+    console.warn('Report: Instantly list campaigns returned 0 campaigns; falling back to INSTANTLY_CAMPAIGN_ID(S).');
+  }
+
+  const envIds = getCampaignIdsFromEnv();
+  if (envIds.length > 0) {
+    console.log(`Report: Instantly — ${envIds.length} campaign(s) from env INSTANTLY_CAMPAIGN_ID(S).`);
+    return envIds;
+  }
+
+  return [];
 }
 
 async function fetchInstantlyDailyAnalytics(
@@ -89,11 +155,17 @@ async function main() {
   }
 
   const metrics = await getMetricsForReport(db, reportDate);
-  const campaignIds = getCampaignIds();
+  const apiKey = process.env.INSTANTLY_API_KEY;
+  const campaignIds = await resolveCampaignIds(apiKey);
 
   let primaryCampaignId: string | null = null;
-  let sent = 0, opened = 0, repliesInst = 0;
-  let contacted = 0, newLeadsContacted = 0, clicks = 0, uniqueClicks = 0;
+  let sent = 0,
+    opened = 0,
+    repliesInst = 0;
+  let contacted = 0,
+    newLeadsContacted = 0,
+    clicks = 0,
+    uniqueClicks = 0;
 
   for (const cid of campaignIds) {
     const row = await fetchInstantlyDailyAnalytics(reportDate, cid);
@@ -113,17 +185,33 @@ async function main() {
       unique_clicks: row.unique_clicks ?? 0,
     });
 
-    if (!primaryCampaignId) {
-      primaryCampaignId = cid;
-      sent = row.sent ?? 0;
-      opened = row.unique_opened ?? row.opened ?? 0;
-      repliesInst = row.unique_replies ?? row.replies ?? 0;
-      contacted = row.contacted ?? 0;
-      newLeadsContacted = row.new_leads_contacted ?? 0;
-      clicks = row.clicks ?? 0;
-      uniqueClicks = row.unique_clicks ?? 0;
-    }
+    const uOpen = row.unique_opened ?? row.opened ?? 0;
+    const uRep = row.unique_replies ?? row.replies ?? 0;
+    const uClk = row.unique_clicks ?? row.clicks ?? 0;
+
+    sent += row.sent ?? 0;
+    opened += uOpen;
+    repliesInst += uRep;
+    contacted += row.contacted ?? 0;
+    newLeadsContacted += row.new_leads_contacted ?? 0;
+    clicks += row.clicks ?? 0;
+    uniqueClicks += uClk;
+
+    if (!primaryCampaignId) primaryCampaignId = cid;
   }
+
+  const aggregatedMultiple = campaignIds.length > 1;
+  const campaignLabelShort =
+    campaignIds.length === 0
+      ? undefined
+      : aggregatedMultiple
+        ? `All campaigns (${campaignIds.length})`
+        : primaryCampaignId
+          ? `${primaryCampaignId.slice(0, 8)}...`
+          : undefined;
+
+  const reportCampaignId =
+    campaignIds.length === 0 ? null : aggregatedMultiple ? 'aggregated' : primaryCampaignId;
 
   const person_ids_count = metrics.person_ids_count ?? 0;
   const leads_pulled = metrics.leads_pulled ?? 0;
@@ -145,7 +233,7 @@ async function main() {
 
   const report = {
     date: reportDate,
-    campaign_id: primaryCampaignId,
+    campaign_id: reportCampaignId,
     apollo: {
       person_ids: person_ids_count,
       leads_with_email: leads_pulled,
@@ -159,6 +247,8 @@ async function main() {
     instantly: {
       pushed_ok,
       pushed_failed,
+      campaigns_count: campaignIds.length,
+      aggregated: aggregatedMultiple,
       sent,
       opened,
       replies: repliesInst,
@@ -187,7 +277,7 @@ async function main() {
 
   const text = buildDailyReportMessage({
     reportDate,
-    campaignIdShort: primaryCampaignId ? `${primaryCampaignId.slice(0, 8)}...` : undefined,
+    campaignIdShort: campaignLabelShort,
     reportRunAtET,
     personIdsCount: person_ids_count,
     leadsPulled: leads_pulled,
@@ -218,7 +308,7 @@ async function main() {
   });
 
   await upsertDailyReport(db, reportDate, metrics, report, {
-    campaignId: primaryCampaignId,
+    campaignId: reportCampaignId,
     sent,
     opened,
     replies: repliesInst,

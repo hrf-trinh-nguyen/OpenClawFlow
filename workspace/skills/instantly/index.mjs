@@ -381,6 +381,8 @@ var API_ENDPOINTS = {
     EMAILS: "https://api.instantly.ai/api/v2/emails",
     UNREAD_COUNT: (campaignId) => `https://api.instantly.ai/api/v2/emails/unread/count?campaign_id=${campaignId}`,
     REPLY: "https://api.instantly.ai/api/v2/emails/reply",
+    /** GET — paginate with `limit` + `starting_after` (see Instantly API list campaigns) */
+    CAMPAIGNS_LIST: "https://api.instantly.ai/api/v2/campaigns",
     ANALYTICS_DAILY: "https://api.instantly.ai/api/v2/campaigns/analytics/daily"
   },
   OPENAI: {
