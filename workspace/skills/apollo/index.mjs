@@ -359,6 +359,8 @@ var APOLLO_ICP_DEFAULTS = {
   ]
 };
 var CLASSIFICATION_MODEL = process.env.REPLY_CLASSIFICATION_MODEL || "gpt-4o";
+var HOT_REPLY_GENERATION_MODEL = process.env.HOT_REPLY_GENERATION_MODEL || process.env.REPLY_CLASSIFICATION_MODEL || "gpt-4o-mini";
+var HOT_REPLY_SIGN_OFF = process.env.HOT_REPLY_SIGN_OFF || "- Bryan Butvidas";
 
 // skills/apollo/index.ts
 validateRequiredEnv(["APOLLO_API_KEY", "SUPABASE_DB_URL"]);

@@ -107,6 +107,8 @@ var SLACK_CHANNELS = {
   ALERT: process.env.SLACK_ALERT_CHANNEL || ""
 };
 var CLASSIFICATION_MODEL = process.env.REPLY_CLASSIFICATION_MODEL || "gpt-4o";
+var HOT_REPLY_GENERATION_MODEL = process.env.HOT_REPLY_GENERATION_MODEL || process.env.REPLY_CLASSIFICATION_MODEL || "gpt-4o-mini";
+var HOT_REPLY_SIGN_OFF = process.env.HOT_REPLY_SIGN_OFF || "- Bryan Butvidas";
 
 // skills/lead-move/index.ts
 function printUsage() {

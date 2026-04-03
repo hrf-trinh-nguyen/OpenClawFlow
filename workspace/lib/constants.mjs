@@ -163,6 +163,55 @@ var HOT_REPLY_TEMPLATE = {
   COMPARE_URL: "https://designpickle.com/comparison"
 };
 var CLASSIFICATION_MODEL = process.env.REPLY_CLASSIFICATION_MODEL || "gpt-4o";
+var HOT_REPLY_GENERATION_MODEL = process.env.HOT_REPLY_GENERATION_MODEL || process.env.REPLY_CLASSIFICATION_MODEL || "gpt-4o-mini";
+var HOT_REPLY_SIGN_OFF = process.env.HOT_REPLY_SIGN_OFF || "- Bryan Butvidas";
+function buildHotReplyGenerationPrompt(params) {
+  const book = params.bookUrl.trim();
+  const compare = params.compareUrl.trim();
+  const sign = params.signOff.trim();
+  if (!book || !compare || !sign) {
+    throw new Error("buildHotReplyGenerationPrompt: bookUrl, compareUrl, and signOff must be non-empty");
+  }
+  const name = params.firstName.trim() || "there";
+  const subj = params.subject.trim() || "(no subject)";
+  const body = params.prospectBody.length > 4e3 ? `${params.prospectBody.slice(0, 4e3)}
+
+[Message truncated for the model]` : params.prospectBody;
+  return `You write a short follow-up email reply for a **hot** sales lead (they showed interest: want to learn more, book time, or continue the conversation).
+
+## Your job
+- Reply in **English**.
+- **Tone:** Warm, professional, B2B-appropriate, confident but not pushy. Sound like a real person (Design Pickle / creative services context is fine). Mirror the prospect\u2019s energy slightly (if they\u2019re brief, stay brief).
+- **First line:** Acknowledge their message in a natural way (do not quote long blocks).
+- **Body:** Move them toward two actions: (1) book a call, (2) skim a comparison page. You must weave these in smoothly\u2014not robotic bullet spam.
+- **Length:** About 3\u20136 short sentences total (plus sign-off). No walls of text.
+
+## Hard requirements (non-negotiable)
+1. Include **both** URLs below **verbatim** (exact characters) in the **plain text** version:
+   - Scheduling: ${book}
+   - Comparison: ${compare}
+2. In the **HTML** version, include **both** URLs as clickable links (\`<a href="EXACT_URL">...</a>\`). Link text can be short (e.g. "Book a time", "Compare options") but \`href\` must be exactly these URLs:
+   - ${book}
+   - ${compare}
+3. End the email with this sign-off line **exactly** (same punctuation):
+   ${sign}
+4. Do **not** invent discounts, legal promises, or specific pricing. Do **not** claim availability or meeting times you don\u2019t know.
+
+## Context for this thread
+- Prospect first name (for greeting): ${name}
+- Subject: ${subj}
+- Their latest reply:
+"""
+${body}
+"""
+
+## Output format
+Return **only** a single JSON object (no markdown fences, no commentary):
+{
+  "body_html": "<p>...</p> ... full HTML email body suitable for Instantly (include <br> or <p> as needed; include the two links as <a href=...>)",
+  "body_text": "Plain text version with both raw URLs present exactly once each (or clearly listed)"
+}`;
+}
 var PROMPTS = {
   CLASSIFICATION: `You are a strict classifier for outbound sales email replies. Your output must be precise and consistent.
 
@@ -216,7 +265,8 @@ var HOT_SIGNAL_PHRASES = [
   "happy to discuss",
   "would like to know more",
   "reach out",
-  "hear more about it"
+  "hear more about it",
+  "Sure I'll bite"
 ];
 export {
   API_ENDPOINTS,
@@ -229,6 +279,8 @@ export {
   EMAIL_STATUS,
   FAILURE_REASON,
   FALLBACK_LIMITS,
+  HOT_REPLY_GENERATION_MODEL,
+  HOT_REPLY_SIGN_OFF,
   HOT_REPLY_TEMPLATE,
   HOT_SIGNAL_PHRASES,
   LEAD_STATUS,
@@ -239,6 +291,7 @@ export {
   RATE_LIMITS,
   REPLY_CATEGORIES,
   SLACK_CHANNELS,
+  buildHotReplyGenerationPrompt,
   isBouncerAutoHandled,
   isCustomerReplyCategory,
   isValidLeadStatus,

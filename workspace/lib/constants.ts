@@ -226,7 +226,76 @@ export const HOT_REPLY_TEMPLATE = {
 /** Model used for reply classification. gpt-4o recommended for strict accuracy. */
 export const CLASSIFICATION_MODEL = process.env.REPLY_CLASSIFICATION_MODEL || 'gpt-4o';
 
+/** Model for generating hot-lead email bodies (can be lighter than classification). */
+export const HOT_REPLY_GENERATION_MODEL =
+  process.env.HOT_REPLY_GENERATION_MODEL || process.env.REPLY_CLASSIFICATION_MODEL || 'gpt-4o-mini';
+
+/** Closing line for hot auto-replies (e.g. "-Bryan Butvidas"). */
+export const HOT_REPLY_SIGN_OFF = process.env.HOT_REPLY_SIGN_OFF || '- Bryan Butvidas';
+
 // ── LLM Prompts ─────────────────────────────────────────────────────
+
+/**
+ * Build the user prompt for OpenAI to draft a hot-lead reply.
+ * Params: prospect’s first name, thread subject, their message, both required URLs, sign-off.
+ */
+export function buildHotReplyGenerationPrompt(params: {
+  firstName: string;
+  subject: string;
+  prospectBody: string;
+  bookUrl: string;
+  compareUrl: string;
+  signOff: string;
+}): string {
+  const book = params.bookUrl.trim();
+  const compare = params.compareUrl.trim();
+  const sign = params.signOff.trim();
+  if (!book || !compare || !sign) {
+    throw new Error('buildHotReplyGenerationPrompt: bookUrl, compareUrl, and signOff must be non-empty');
+  }
+
+  const name = params.firstName.trim() || 'there';
+  const subj = params.subject.trim() || '(no subject)';
+  const body =
+    params.prospectBody.length > 4000
+      ? `${params.prospectBody.slice(0, 4000)}\n\n[Message truncated for the model]`
+      : params.prospectBody;
+
+  return `You write a short follow-up email reply for a **hot** sales lead (they showed interest: want to learn more, book time, or continue the conversation).
+
+## Your job
+- Reply in **English**.
+- **Tone:** Warm, professional, B2B-appropriate, confident but not pushy. Sound like a real person (Design Pickle / creative services context is fine). Mirror the prospect’s energy slightly (if they’re brief, stay brief).
+- **First line:** Acknowledge their message in a natural way (do not quote long blocks).
+- **Body:** Move them toward two actions: (1) book a call, (2) skim a comparison page. You must weave these in smoothly—not robotic bullet spam.
+- **Length:** About 3–6 short sentences total (plus sign-off). No walls of text.
+
+## Hard requirements (non-negotiable)
+1. Include **both** URLs below **verbatim** (exact characters) in the **plain text** version:
+   - Scheduling: ${book}
+   - Comparison: ${compare}
+2. In the **HTML** version, include **both** URLs as clickable links (\`<a href="EXACT_URL">...</a>\`). Link text can be short (e.g. "Book a time", "Compare options") but \`href\` must be exactly these URLs:
+   - ${book}
+   - ${compare}
+3. End the email with this sign-off line **exactly** (same punctuation):
+   ${sign}
+4. Do **not** invent discounts, legal promises, or specific pricing. Do **not** claim availability or meeting times you don’t know.
+
+## Context for this thread
+- Prospect first name (for greeting): ${name}
+- Subject: ${subj}
+- Their latest reply:
+"""
+${body}
+"""
+
+## Output format
+Return **only** a single JSON object (no markdown fences, no commentary):
+{
+  "body_html": "<p>...</p> ... full HTML email body suitable for Instantly (include <br> or <p> as needed; include the two links as <a href=...>)",
+  "body_text": "Plain text version with both raw URLs present exactly once each (or clearly listed)"
+}`;
+}
 
 export const PROMPTS = {
   CLASSIFICATION: `You are a strict classifier for outbound sales email replies. Your output must be precise and consistent.
@@ -284,5 +353,6 @@ export const HOT_SIGNAL_PHRASES = [
   "would like to know more",
   "reach out",
   "hear more about it",
+  "Sure I'll bite"
 ] as const;
 

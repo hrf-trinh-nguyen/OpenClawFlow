@@ -397,6 +397,55 @@ var HOT_REPLY_TEMPLATE = {
   COMPARE_URL: "https://designpickle.com/comparison"
 };
 var CLASSIFICATION_MODEL = process.env.REPLY_CLASSIFICATION_MODEL || "gpt-4o";
+var HOT_REPLY_GENERATION_MODEL = process.env.HOT_REPLY_GENERATION_MODEL || process.env.REPLY_CLASSIFICATION_MODEL || "gpt-4o-mini";
+var HOT_REPLY_SIGN_OFF = process.env.HOT_REPLY_SIGN_OFF || "- Bryan Butvidas";
+function buildHotReplyGenerationPrompt(params) {
+  const book = params.bookUrl.trim();
+  const compare = params.compareUrl.trim();
+  const sign = params.signOff.trim();
+  if (!book || !compare || !sign) {
+    throw new Error("buildHotReplyGenerationPrompt: bookUrl, compareUrl, and signOff must be non-empty");
+  }
+  const name = params.firstName.trim() || "there";
+  const subj = params.subject.trim() || "(no subject)";
+  const body = params.prospectBody.length > 4e3 ? `${params.prospectBody.slice(0, 4e3)}
+
+[Message truncated for the model]` : params.prospectBody;
+  return `You write a short follow-up email reply for a **hot** sales lead (they showed interest: want to learn more, book time, or continue the conversation).
+
+## Your job
+- Reply in **English**.
+- **Tone:** Warm, professional, B2B-appropriate, confident but not pushy. Sound like a real person (Design Pickle / creative services context is fine). Mirror the prospect\u2019s energy slightly (if they\u2019re brief, stay brief).
+- **First line:** Acknowledge their message in a natural way (do not quote long blocks).
+- **Body:** Move them toward two actions: (1) book a call, (2) skim a comparison page. You must weave these in smoothly\u2014not robotic bullet spam.
+- **Length:** About 3\u20136 short sentences total (plus sign-off). No walls of text.
+
+## Hard requirements (non-negotiable)
+1. Include **both** URLs below **verbatim** (exact characters) in the **plain text** version:
+   - Scheduling: ${book}
+   - Comparison: ${compare}
+2. In the **HTML** version, include **both** URLs as clickable links (\`<a href="EXACT_URL">...</a>\`). Link text can be short (e.g. "Book a time", "Compare options") but \`href\` must be exactly these URLs:
+   - ${book}
+   - ${compare}
+3. End the email with this sign-off line **exactly** (same punctuation):
+   ${sign}
+4. Do **not** invent discounts, legal promises, or specific pricing. Do **not** claim availability or meeting times you don\u2019t know.
+
+## Context for this thread
+- Prospect first name (for greeting): ${name}
+- Subject: ${subj}
+- Their latest reply:
+"""
+${body}
+"""
+
+## Output format
+Return **only** a single JSON object (no markdown fences, no commentary):
+{
+  "body_html": "<p>...</p> ... full HTML email body suitable for Instantly (include <br> or <p> as needed; include the two links as <a href=...>)",
+  "body_text": "Plain text version with both raw URLs present exactly once each (or clearly listed)"
+}`;
+}
 var PROMPTS = {
   CLASSIFICATION: `You are a strict classifier for outbound sales email replies. Your output must be precise and consistent.
 
@@ -450,7 +499,8 @@ var HOT_SIGNAL_PHRASES = [
   "happy to discuss",
   "would like to know more",
   "reach out",
-  "hear more about it"
+  "hear more about it",
+  "Sure I'll bite"
 ];
 
 // lib/errors.ts
@@ -626,6 +676,20 @@ async function getUnreadCount(apiKey, campaignId) {
   return typeof data.count === "number" ? data.count : data.unread_count ?? 0;
 }
 async function replyToEmail(apiKey, params) {
+  const replyToUuid = String(params.reply_to_uuid ?? "").trim();
+  const eaccount = String(params.eaccount ?? "").trim();
+  const bodyHtml = String(params.body_html ?? "").trim();
+  const bodyText = String(params.body_text ?? "").trim();
+  const subject = String(params.subject ?? "").trim() || "Re: Your inquiry";
+  if (!replyToUuid || !eaccount) {
+    throw new InstantlyApiError("reply", 400, "Missing or empty reply_to_uuid or eaccount");
+  }
+  if (!bodyHtml || !bodyText) {
+    throw new InstantlyApiError("reply", 400, "Missing or empty body_html or body_text");
+  }
+  if (!String(apiKey ?? "").trim()) {
+    throw new InstantlyApiError("reply", 401, "Missing or empty API key");
+  }
   const response = await fetch(API_ENDPOINTS.INSTANTLY.REPLY, {
     method: "POST",
     headers: {
@@ -633,10 +697,10 @@ async function replyToEmail(apiKey, params) {
       Authorization: `Bearer ${apiKey}`
     },
     body: JSON.stringify({
-      reply_to_uuid: params.reply_to_uuid,
-      eaccount: params.eaccount,
-      subject: params.subject || "Re: Your inquiry",
-      body: { html: params.body_html, text: params.body_text }
+      reply_to_uuid: replyToUuid,
+      eaccount,
+      subject,
+      body: { html: bodyHtml, text: bodyText }
     })
   });
   if (!response.ok) {
@@ -787,21 +851,103 @@ async function classifyWithPrefilter(apiKey, subject, body) {
 }
 
 // skills/instantly/templates.ts
+function nonEmptyTrimmed(s) {
+  return typeof s === "string" && s.trim().length > 0;
+}
+function hotReplyBodiesReadyForSend(html, text, opts) {
+  var _a, _b;
+  const bookUrl = ((_a = (opts == null ? void 0 : opts.bookUrl) ?? HOT_REPLY_TEMPLATE.BOOK_NOW_URL) == null ? void 0 : _a.trim()) ?? "";
+  const compareUrl = ((_b = (opts == null ? void 0 : opts.compareUrl) ?? HOT_REPLY_TEMPLATE.COMPARE_URL) == null ? void 0 : _b.trim()) ?? "";
+  if (!bookUrl || !compareUrl) return false;
+  const h = (html ?? "").trim();
+  const t = (text ?? "").trim();
+  if (h.length < 10 || t.length < 10) return false;
+  return h.includes(bookUrl) && h.includes(compareUrl) && t.includes(bookUrl) && t.includes(compareUrl);
+}
 function buildHotReplyTemplate(firstName) {
-  const name = firstName || "there";
-  const { BOOK_NOW_URL, COMPARE_URL } = HOT_REPLY_TEMPLATE;
-  const html = `Awesome ${name},<br><br>You can schedule here: <a href="${BOOK_NOW_URL}">Book now</a><br><br>Have a look at this before we connect. Quickly covers us vs. alternatives.<br>\u{1F449} <a href="${COMPARE_URL}">Compare Design Pickle</a><br><br>See you then.<br>-Bryan Butvidas`;
+  var _a, _b;
+  const bookUrl = ((_a = HOT_REPLY_TEMPLATE.BOOK_NOW_URL) == null ? void 0 : _a.trim()) ?? "";
+  const compareUrl = ((_b = HOT_REPLY_TEMPLATE.COMPARE_URL) == null ? void 0 : _b.trim()) ?? "";
+  if (!bookUrl || !compareUrl) {
+    throw new Error("HOT_REPLY_TEMPLATE: BOOK_NOW_URL and COMPARE_URL must be non-empty strings");
+  }
+  const name = (firstName || "there").trim() || "there";
+  const html = `Awesome ${name},<br><br>You can schedule here: <a href="${bookUrl}">Book now</a><br><br>Have a look at this before we connect. Quickly covers us vs. alternatives.<br>\u{1F449} <a href="${compareUrl}">Compare Design Pickle</a><br><br>See you then.<br>-Bryan Butvidas`;
   const text = `Awesome ${name},
 
 You can schedule here: Book now
-${BOOK_NOW_URL}
+${bookUrl}
 
 Have a look at this before we connect. Quickly covers us vs. alternatives.
 \u{1F449} Compare Design Pickle
-${COMPARE_URL}
+${compareUrl}
 
 See you then.
 -Bryan Butvidas`;
+  return { html, text };
+}
+function urlsPresentInBothOutputs(html, text, bookUrl, compareUrl) {
+  return html.includes(bookUrl) && html.includes(compareUrl) && text.includes(bookUrl) && text.includes(compareUrl);
+}
+async function generateHotReplyContent(openaiApiKey, params) {
+  var _a, _b, _c;
+  if (!nonEmptyTrimmed(openaiApiKey)) {
+    return null;
+  }
+  const bookUrl = (params.bookUrl ?? HOT_REPLY_TEMPLATE.BOOK_NOW_URL).trim();
+  const compareUrl = (params.compareUrl ?? HOT_REPLY_TEMPLATE.COMPARE_URL).trim();
+  const signOff = (params.signOff ?? HOT_REPLY_SIGN_OFF).trim();
+  if (!bookUrl || !compareUrl || !signOff) {
+    console.warn("   \u26A0\uFE0F  Hot reply AI skipped: empty bookUrl, compareUrl, or signOff.");
+    return null;
+  }
+  if (!nonEmptyTrimmed(HOT_REPLY_GENERATION_MODEL)) {
+    console.warn("   \u26A0\uFE0F  Hot reply AI skipped: HOT_REPLY_GENERATION_MODEL is empty.");
+    return null;
+  }
+  if (!nonEmptyTrimmed(params.prospectBody)) {
+    return null;
+  }
+  const prompt = buildHotReplyGenerationPrompt({
+    firstName: params.firstName,
+    subject: params.subject,
+    prospectBody: params.prospectBody,
+    bookUrl,
+    compareUrl,
+    signOff
+  });
+  const response = await fetch(API_ENDPOINTS.OPENAI.CHAT_COMPLETIONS, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${openaiApiKey}`
+    },
+    body: JSON.stringify({
+      model: HOT_REPLY_GENERATION_MODEL,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.65,
+      response_format: { type: "json_object" }
+    })
+  });
+  if (!response.ok) {
+    throw new OpenAiApiError(response.status, `Hot reply generation failed: ${response.status}`);
+  }
+  const raw = await response.json();
+  const content = (_c = (_b = (_a = raw.choices) == null ? void 0 : _a[0]) == null ? void 0 : _b.message) == null ? void 0 : _c.content;
+  if (!content) return null;
+  const parsed = parseJsonSafe(content);
+  if (!parsed) return null;
+  const html = (parsed.body_html ?? parsed.html ?? "").trim();
+  const text = (parsed.body_text ?? parsed.text ?? "").trim();
+  if (!html || !text) return null;
+  if (!urlsPresentInBothOutputs(html, text, bookUrl, compareUrl)) {
+    console.warn("   \u26A0\uFE0F  Generated hot reply missing required URLs; using static template.");
+    return null;
+  }
+  if (!hotReplyBodiesReadyForSend(html, text, { bookUrl, compareUrl })) {
+    console.warn("   \u26A0\uFE0F  Generated hot reply failed final body checks; using static template.");
+    return null;
+  }
   return { html, text };
 }
 
@@ -813,10 +959,21 @@ function getFetchDateRange() {
     process.env.FETCH_DATE || process.env.REPORT_DATE
   );
 }
-async function handleHotLead(db, apiKey, reply) {
-  var _a, _b, _c;
-  if (!reply.email_id || !reply.eaccount) {
+function useHotReplyAi() {
+  const v = process.env.HOT_REPLY_USE_AI;
+  if (v === void 0 || String(v).trim() === "") return true;
+  return !/^(0|false|no|off)$/i.test(String(v).trim());
+}
+async function handleHotLead(db, apiKey, reply, openaiApiKey) {
+  var _a, _b;
+  const emailId = String(reply.email_id ?? "").trim();
+  const eaccount = String(reply.eaccount ?? "").trim();
+  if (!emailId || !eaccount) {
     console.log(`   \u26A0\uFE0F  Skip reply (missing email_id/eaccount): ${reply.from_email}`);
+    return;
+  }
+  if (!String(apiKey ?? "").trim()) {
+    console.warn(`   \u26A0\uFE0F  Skip hot reply: INSTANTLY_API_KEY is empty`);
     return;
   }
   try {
@@ -825,14 +982,45 @@ async function handleHotLead(db, apiKey, reply) {
       [reply.from_email]
     );
     const firstName = ((_b = (_a = leadRes.rows[0]) == null ? void 0 : _a.first_name) == null ? void 0 : _b.trim()) || "";
-    const { html, text } = buildHotReplyTemplate(firstName);
-    const subject = ((_c = reply.subject) == null ? void 0 : _c.startsWith("Re:")) ? reply.subject : `Re: ${reply.subject || "Your inquiry"}`;
+    let html;
+    let text;
+    if (useHotReplyAi() && String(openaiApiKey ?? "").trim()) {
+      try {
+        const gen = await generateHotReplyContent(openaiApiKey, {
+          firstName,
+          subject: reply.subject || "",
+          prospectBody: reply.body || ""
+        });
+        if (gen) {
+          html = gen.html;
+          text = gen.text;
+          console.log(`   \u2728 Hot reply: AI-generated`);
+        }
+      } catch (err) {
+        console.warn(`   \u26A0\uFE0F  Hot reply AI failed, using template: ${getErrorMessage(err)}`);
+      }
+    }
+    if (!html || !text) {
+      const t = buildHotReplyTemplate(firstName);
+      html = t.html;
+      text = t.text;
+    }
+    const bodyHtml = html.trim();
+    const bodyText = text.trim();
+    if (!hotReplyBodiesReadyForSend(bodyHtml, bodyText)) {
+      console.warn(
+        `   \u26A0\uFE0F  Skip send to ${reply.from_email}: reply body missing required URLs or too short (misconfigured template?)`
+      );
+      return;
+    }
+    const subjRaw = String(reply.subject ?? "").trim();
+    const subject = subjRaw.length > 0 ? subjRaw.startsWith("Re:") ? subjRaw : `Re: ${subjRaw}` : "Re: Your inquiry";
     await replyToEmail(apiKey, {
-      reply_to_uuid: reply.email_id,
-      eaccount: reply.eaccount,
-      subject,
-      body_html: html,
-      body_text: text
+      reply_to_uuid: emailId,
+      eaccount,
+      subject: subject.trim(),
+      body_html: bodyHtml,
+      body_text: bodyText
     });
     await db.query(`UPDATE replies SET replied_at = NOW(), updated_at = NOW() WHERE thread_id = $1`, [
       reply.thread_id
@@ -966,7 +1154,7 @@ async function runFetchAndClassifyService(db, runId, apiKey, campaignId, openaiA
         switch (classification.category) {
           case "hot":
             hot++;
-            await handleHotLead(db, apiKey, reply);
+            await handleHotLead(db, apiKey, reply, openaiApiKey);
             break;
           case "soft":
             soft++;

@@ -10,7 +10,11 @@ import { createServiceExecution, updateServiceExecution } from '../../lib/supaba
 import { getErrorMessage } from '../../lib/errors.js';
 import { fetchReplies, getUnreadCount, replyToEmail, type Reply } from './api.js';
 import { classifyWithPrefilter, type Classification } from './classify.js';
-import { buildHotReplyTemplate } from './templates.js';
+import {
+  buildHotReplyTemplate,
+  generateHotReplyContent,
+  hotReplyBodiesReadyForSend,
+} from './templates.js';
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -37,13 +41,28 @@ function getFetchDateRange(): { min: string; max: string } {
   );
 }
 
+function useHotReplyAi(): boolean {
+  const v = process.env.HOT_REPLY_USE_AI;
+  if (v === undefined || String(v).trim() === '') return true;
+  return !/^(0|false|no|off)$/i.test(String(v).trim());
+}
+
 async function handleHotLead(
   db: any,
   apiKey: string,
-  reply: Reply
+  reply: Reply,
+  openaiApiKey: string
 ): Promise<void> {
-  if (!reply.email_id || !reply.eaccount) {
+  const emailId = String(reply.email_id ?? '').trim();
+  const eaccount = String(reply.eaccount ?? '').trim();
+
+  if (!emailId || !eaccount) {
     console.log(`   ⚠️  Skip reply (missing email_id/eaccount): ${reply.from_email}`);
+    return;
+  }
+
+  if (!String(apiKey ?? '').trim()) {
+    console.warn(`   ⚠️  Skip hot reply: INSTANTLY_API_KEY is empty`);
     return;
   }
 
@@ -53,15 +72,56 @@ async function handleHotLead(
       [reply.from_email]
     );
     const firstName = leadRes.rows[0]?.first_name?.trim() || '';
-    const { html, text } = buildHotReplyTemplate(firstName);
-    const subject = reply.subject?.startsWith('Re:') ? reply.subject : `Re: ${reply.subject || 'Your inquiry'}`;
+
+    let html: string | undefined;
+    let text: string | undefined;
+
+    if (useHotReplyAi() && String(openaiApiKey ?? '').trim()) {
+      try {
+        const gen = await generateHotReplyContent(openaiApiKey, {
+          firstName,
+          subject: reply.subject || '',
+          prospectBody: reply.body || '',
+        });
+        if (gen) {
+          html = gen.html;
+          text = gen.text;
+          console.log(`   ✨ Hot reply: AI-generated`);
+        }
+      } catch (err: unknown) {
+        console.warn(`   ⚠️  Hot reply AI failed, using template: ${getErrorMessage(err)}`);
+      }
+    }
+
+    if (!html || !text) {
+      const t = buildHotReplyTemplate(firstName);
+      html = t.html;
+      text = t.text;
+    }
+
+    const bodyHtml = html.trim();
+    const bodyText = text.trim();
+    if (!hotReplyBodiesReadyForSend(bodyHtml, bodyText)) {
+      console.warn(
+        `   ⚠️  Skip send to ${reply.from_email}: reply body missing required URLs or too short (misconfigured template?)`
+      );
+      return;
+    }
+
+    const subjRaw = String(reply.subject ?? '').trim();
+    const subject =
+      subjRaw.length > 0
+        ? subjRaw.startsWith('Re:')
+          ? subjRaw
+          : `Re: ${subjRaw}`
+        : 'Re: Your inquiry';
 
     await replyToEmail(apiKey, {
-      reply_to_uuid: reply.email_id,
-      eaccount: reply.eaccount,
-      subject,
-      body_html: html,
-      body_text: text,
+      reply_to_uuid: emailId,
+      eaccount,
+      subject: subject.trim(),
+      body_html: bodyHtml,
+      body_text: bodyText,
     });
 
     await db.query(`UPDATE replies SET replied_at = NOW(), updated_at = NOW() WHERE thread_id = $1`, [
@@ -229,7 +289,7 @@ export async function runFetchAndClassifyService(
         switch (classification.category) {
           case 'hot':
             hot++;
-            await handleHotLead(db, apiKey, reply);
+            await handleHotLead(db, apiKey, reply, openaiApiKey);
             break;
           case 'soft':
             soft++;

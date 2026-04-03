@@ -206,6 +206,22 @@ export async function replyToEmail(
     body_text: string;
   }
 ): Promise<void> {
+  const replyToUuid = String(params.reply_to_uuid ?? '').trim();
+  const eaccount = String(params.eaccount ?? '').trim();
+  const bodyHtml = String(params.body_html ?? '').trim();
+  const bodyText = String(params.body_text ?? '').trim();
+  const subject = String(params.subject ?? '').trim() || 'Re: Your inquiry';
+
+  if (!replyToUuid || !eaccount) {
+    throw new InstantlyApiError('reply', 400, 'Missing or empty reply_to_uuid or eaccount');
+  }
+  if (!bodyHtml || !bodyText) {
+    throw new InstantlyApiError('reply', 400, 'Missing or empty body_html or body_text');
+  }
+  if (!String(apiKey ?? '').trim()) {
+    throw new InstantlyApiError('reply', 401, 'Missing or empty API key');
+  }
+
   const response = await fetch(API_ENDPOINTS.INSTANTLY.REPLY, {
     method: 'POST',
     headers: {
@@ -213,10 +229,10 @@ export async function replyToEmail(
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      reply_to_uuid: params.reply_to_uuid,
-      eaccount: params.eaccount,
-      subject: params.subject || 'Re: Your inquiry',
-      body: { html: params.body_html, text: params.body_text },
+      reply_to_uuid: replyToUuid,
+      eaccount,
+      subject,
+      body: { html: bodyHtml, text: bodyText },
     }),
   });
 

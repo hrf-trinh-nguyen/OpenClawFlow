@@ -20,8 +20,10 @@
 
 import { getDb } from '../../lib/supabase-pipeline.js';
 import { validateRequiredEnv, sleep, parseIntSafe } from '../../lib/utils.js';
-import { API_ENDPOINTS, HOT_REPLY_TEMPLATE, RATE_LIMITS } from '../../lib/constants.js';
+import { RATE_LIMITS } from '../../lib/constants.js';
 import { isValidReplyCategory, isCustomerReplyCategory } from '../../lib/constants.js';
+import { replyToEmail } from '../instantly/api.js';
+import { buildHotReplyTemplate, hotReplyBodiesReadyForSend } from '../instantly/templates.js';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -39,44 +41,6 @@ const categories = REPLY_CATEGORY.split(',')
 if (categories.length === 0) {
   console.error('❌ REPLY_CATEGORY must be one or more of: hot, soft, objection, negative');
   process.exit(1);
-}
-
-// ── Instantly Reply API ─────────────────────────────────────────────
-
-function buildHotReplyTemplate(firstName: string): { html: string; text: string } {
-  const name = firstName || 'there';
-  const { BOOK_NOW_URL, COMPARE_URL } = HOT_REPLY_TEMPLATE;
-
-  const html = `Awesome ${name},<br><br>You can schedule here: <a href="${BOOK_NOW_URL}">Book now</a><br><br>Have a look at this before we connect. Quickly covers us vs. alternatives.<br>👉 <a href="${COMPARE_URL}">Compare Design Pickle</a><br><br>See you then.<br>-Bryan Butvidas`;
-  const text = `Awesome ${name},\n\nYou can schedule here: Book now\n${BOOK_NOW_URL}\n\nHave a look at this before we connect. Quickly covers us vs. alternatives.\n👉 Compare Design Pickle\n${COMPARE_URL}\n\nSee you then.\n-Bryan Butvidas`;
-  return { html, text };
-}
-
-async function instantlyReplyToEmail(params: {
-  reply_to_uuid: string;
-  eaccount: string;
-  subject: string;
-  body_html: string;
-  body_text: string;
-}): Promise<void> {
-  const response = await fetch(API_ENDPOINTS.INSTANTLY.REPLY, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${INSTANTLY_API_KEY}`,
-    },
-    body: JSON.stringify({
-      reply_to_uuid: params.reply_to_uuid,
-      eaccount: params.eaccount,
-      subject: params.subject || 'Re: Your inquiry',
-      body: { html: params.body_html, text: params.body_text },
-    }),
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Instantly reply failed: ${response.status} ${text}`);
-  }
 }
 
 // ── Main ────────────────────────────────────────────────────────────
@@ -126,22 +90,49 @@ async function main(): Promise<void> {
   let sent = 0;
   let failed = 0;
 
+  const apiKey = String(INSTANTLY_API_KEY).trim();
+  if (!apiKey) {
+    console.error('❌ INSTANTLY_API_KEY is empty after trim');
+    await db.end();
+    process.exit(1);
+  }
+
   for (const row of rows) {
     try {
+      const emailId = String(row.email_id ?? '').trim();
+      const eaccount = String(row.eaccount ?? '').trim();
+      if (!emailId || !eaccount) {
+        failed++;
+        console.error(`   ❌ Skip ${row.from_email}: missing email_id or eaccount`);
+        continue;
+      }
+
       const leadRes = await db.query(
         `SELECT first_name FROM leads WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1`,
         [row.from_email]
       );
       const firstName = leadRes.rows[0]?.first_name?.trim() || '';
       const { html, text } = buildHotReplyTemplate(firstName);
-      const subject = row.subject?.startsWith('Re:') ? row.subject : `Re: ${row.subject || 'Your inquiry'}`;
+      if (!hotReplyBodiesReadyForSend(html, text)) {
+        failed++;
+        console.error(`   ❌ Skip ${row.from_email}: reply body failed validation (check HOT_REPLY_TEMPLATE URLs)`);
+        continue;
+      }
 
-      await instantlyReplyToEmail({
-        reply_to_uuid: row.email_id,
-        eaccount: row.eaccount,
+      const subjRaw = String(row.subject ?? '').trim();
+      const subject =
+        subjRaw.length > 0
+          ? subjRaw.startsWith('Re:')
+            ? subjRaw
+            : `Re: ${subjRaw}`
+          : 'Re: Your inquiry';
+
+      await replyToEmail(apiKey, {
+        reply_to_uuid: emailId,
+        eaccount,
         subject,
-        body_html: html,
-        body_text: text,
+        body_html: html.trim(),
+        body_text: text.trim(),
       });
 
       await db.query(`UPDATE replies SET replied_at = NOW(), updated_at = NOW() WHERE id = $1`, [row.id]);

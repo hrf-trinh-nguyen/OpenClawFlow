@@ -153,6 +153,107 @@ var HOT_REPLY_TEMPLATE = {
   COMPARE_URL: "https://designpickle.com/comparison"
 };
 var CLASSIFICATION_MODEL = process.env.REPLY_CLASSIFICATION_MODEL || "gpt-4o";
+var HOT_REPLY_GENERATION_MODEL = process.env.HOT_REPLY_GENERATION_MODEL || process.env.REPLY_CLASSIFICATION_MODEL || "gpt-4o-mini";
+var HOT_REPLY_SIGN_OFF = process.env.HOT_REPLY_SIGN_OFF || "- Bryan Butvidas";
+
+// lib/errors.ts
+var OpenClawError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "OpenClawError";
+  }
+};
+var ApiError = class extends OpenClawError {
+  constructor(service, statusCode, message) {
+    super(`[${service}] ${message}`);
+    this.service = service;
+    this.statusCode = statusCode;
+    this.name = "ApiError";
+  }
+};
+var InstantlyApiError = class extends ApiError {
+  constructor(operation, statusCode, message) {
+    super("Instantly", statusCode, `${operation}: ${message}`);
+    this.operation = operation;
+    this.name = "InstantlyApiError";
+  }
+  /** IDs of leads successfully processed before the error (for partial recovery) */
+  partialSuccessIds = [];
+  /** Attach IDs of leads that were successfully processed before the error */
+  withPartialSuccess(ids) {
+    this.partialSuccessIds = [...ids];
+    return this;
+  }
+};
+
+// skills/instantly/api.ts
+async function replyToEmail(apiKey, params) {
+  const replyToUuid = String(params.reply_to_uuid ?? "").trim();
+  const eaccount = String(params.eaccount ?? "").trim();
+  const bodyHtml = String(params.body_html ?? "").trim();
+  const bodyText = String(params.body_text ?? "").trim();
+  const subject = String(params.subject ?? "").trim() || "Re: Your inquiry";
+  if (!replyToUuid || !eaccount) {
+    throw new InstantlyApiError("reply", 400, "Missing or empty reply_to_uuid or eaccount");
+  }
+  if (!bodyHtml || !bodyText) {
+    throw new InstantlyApiError("reply", 400, "Missing or empty body_html or body_text");
+  }
+  if (!String(apiKey ?? "").trim()) {
+    throw new InstantlyApiError("reply", 401, "Missing or empty API key");
+  }
+  const response = await fetch(API_ENDPOINTS.INSTANTLY.REPLY, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      reply_to_uuid: replyToUuid,
+      eaccount,
+      subject,
+      body: { html: bodyHtml, text: bodyText }
+    })
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new InstantlyApiError("reply", response.status, `${response.status} ${text}`);
+  }
+}
+
+// skills/instantly/templates.ts
+function hotReplyBodiesReadyForSend(html, text, opts) {
+  var _a, _b;
+  const bookUrl = ((_a = (opts == null ? void 0 : opts.bookUrl) ?? HOT_REPLY_TEMPLATE.BOOK_NOW_URL) == null ? void 0 : _a.trim()) ?? "";
+  const compareUrl = ((_b = (opts == null ? void 0 : opts.compareUrl) ?? HOT_REPLY_TEMPLATE.COMPARE_URL) == null ? void 0 : _b.trim()) ?? "";
+  if (!bookUrl || !compareUrl) return false;
+  const h = (html ?? "").trim();
+  const t = (text ?? "").trim();
+  if (h.length < 10 || t.length < 10) return false;
+  return h.includes(bookUrl) && h.includes(compareUrl) && t.includes(bookUrl) && t.includes(compareUrl);
+}
+function buildHotReplyTemplate(firstName) {
+  var _a, _b;
+  const bookUrl = ((_a = HOT_REPLY_TEMPLATE.BOOK_NOW_URL) == null ? void 0 : _a.trim()) ?? "";
+  const compareUrl = ((_b = HOT_REPLY_TEMPLATE.COMPARE_URL) == null ? void 0 : _b.trim()) ?? "";
+  if (!bookUrl || !compareUrl) {
+    throw new Error("HOT_REPLY_TEMPLATE: BOOK_NOW_URL and COMPARE_URL must be non-empty strings");
+  }
+  const name = (firstName || "there").trim() || "there";
+  const html = `Awesome ${name},<br><br>You can schedule here: <a href="${bookUrl}">Book now</a><br><br>Have a look at this before we connect. Quickly covers us vs. alternatives.<br>\u{1F449} <a href="${compareUrl}">Compare Design Pickle</a><br><br>See you then.<br>-Bryan Butvidas`;
+  const text = `Awesome ${name},
+
+You can schedule here: Book now
+${bookUrl}
+
+Have a look at this before we connect. Quickly covers us vs. alternatives.
+\u{1F449} Compare Design Pickle
+${compareUrl}
+
+See you then.
+-Bryan Butvidas`;
+  return { html, text };
+}
 
 // skills/reply-by-category/index.ts
 validateRequiredEnv(["INSTANTLY_API_KEY", "SUPABASE_DB_URL"]);
@@ -164,44 +265,8 @@ if (categories.length === 0) {
   console.error("\u274C REPLY_CATEGORY must be one or more of: hot, soft, objection, negative");
   process.exit(1);
 }
-function buildHotReplyTemplate(firstName) {
-  const name = firstName || "there";
-  const { BOOK_NOW_URL, COMPARE_URL } = HOT_REPLY_TEMPLATE;
-  const html = `Awesome ${name},<br><br>You can schedule here: <a href="${BOOK_NOW_URL}">Book now</a><br><br>Have a look at this before we connect. Quickly covers us vs. alternatives.<br>\u{1F449} <a href="${COMPARE_URL}">Compare Design Pickle</a><br><br>See you then.<br>-Bryan Butvidas`;
-  const text = `Awesome ${name},
-
-You can schedule here: Book now
-${BOOK_NOW_URL}
-
-Have a look at this before we connect. Quickly covers us vs. alternatives.
-\u{1F449} Compare Design Pickle
-${COMPARE_URL}
-
-See you then.
--Bryan Butvidas`;
-  return { html, text };
-}
-async function instantlyReplyToEmail(params) {
-  const response = await fetch(API_ENDPOINTS.INSTANTLY.REPLY, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${INSTANTLY_API_KEY}`
-    },
-    body: JSON.stringify({
-      reply_to_uuid: params.reply_to_uuid,
-      eaccount: params.eaccount,
-      subject: params.subject || "Re: Your inquiry",
-      body: { html: params.body_html, text: params.body_text }
-    })
-  });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Instantly reply failed: ${response.status} ${text}`);
-  }
-}
 async function main() {
-  var _a, _b, _c;
+  var _a, _b;
   console.log(`
 \u{1F4E4} Reply By Category`);
   console.log(`   Categories: ${categories.join(", ")}`);
@@ -235,21 +300,40 @@ async function main() {
 `);
   let sent = 0;
   let failed = 0;
+  const apiKey = String(INSTANTLY_API_KEY).trim();
+  if (!apiKey) {
+    console.error("\u274C INSTANTLY_API_KEY is empty after trim");
+    await db.end();
+    process.exit(1);
+  }
   for (const row of rows) {
     try {
+      const emailId = String(row.email_id ?? "").trim();
+      const eaccount = String(row.eaccount ?? "").trim();
+      if (!emailId || !eaccount) {
+        failed++;
+        console.error(`   \u274C Skip ${row.from_email}: missing email_id or eaccount`);
+        continue;
+      }
       const leadRes = await db.query(
         `SELECT first_name FROM leads WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1`,
         [row.from_email]
       );
       const firstName = ((_b = (_a = leadRes.rows[0]) == null ? void 0 : _a.first_name) == null ? void 0 : _b.trim()) || "";
       const { html, text } = buildHotReplyTemplate(firstName);
-      const subject = ((_c = row.subject) == null ? void 0 : _c.startsWith("Re:")) ? row.subject : `Re: ${row.subject || "Your inquiry"}`;
-      await instantlyReplyToEmail({
-        reply_to_uuid: row.email_id,
-        eaccount: row.eaccount,
+      if (!hotReplyBodiesReadyForSend(html, text)) {
+        failed++;
+        console.error(`   \u274C Skip ${row.from_email}: reply body failed validation (check HOT_REPLY_TEMPLATE URLs)`);
+        continue;
+      }
+      const subjRaw = String(row.subject ?? "").trim();
+      const subject = subjRaw.length > 0 ? subjRaw.startsWith("Re:") ? subjRaw : `Re: ${subjRaw}` : "Re: Your inquiry";
+      await replyToEmail(apiKey, {
+        reply_to_uuid: emailId,
+        eaccount,
         subject,
-        body_html: html,
-        body_text: text
+        body_html: html.trim(),
+        body_text: text.trim()
       });
       await db.query(`UPDATE replies SET replied_at = NOW(), updated_at = NOW() WHERE id = $1`, [row.id]);
       sent++;

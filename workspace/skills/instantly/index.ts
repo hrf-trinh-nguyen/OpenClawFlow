@@ -20,6 +20,9 @@
  * - FETCH_DATE_FROM + FETCH_DATE_TO: Date range (optional)
  * - PROCESS_REPLIES_SLACK_REPORT: set to 1/true for fetch mode to post the Process Replies template to
  *   SLACK_REPORT_CHANNEL (default: off — use evening cron only)
+ * - HOT_REPLY_USE_AI: 0/false/off to use static hot template only; default on (OpenAI drafts reply from prospect text).
+ * - HOT_REPLY_GENERATION_MODEL: model for hot reply generation (default: REPLY_CLASSIFICATION_MODEL or gpt-4o-mini).
+ * - HOT_REPLY_SIGN_OFF: closing line (default: -Bryan Butvidas). URLs stay HOT_REPLY_TEMPLATE in constants.
  */
 
 import {
